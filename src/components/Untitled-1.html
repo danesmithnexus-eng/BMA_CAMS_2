@@ -1,0 +1,89 @@
+   <div v-if="isCourseExpanded(course)">
+                        <!-- Inner loop: v-for over the questions in that group -->
+                        <div v-for="q in qs" :key="q.id" class="card mb-3">
+                            <div class="card-header d-flex justify-content-between">
+                                <span>Question Preview</span>
+                                <span :class="getStatusBadge(q.status)">{{ q.status }}</span>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted"><strong>Course:</strong> {{ q.course_code || (coursesById[q.course_id] && coursesById[q.course_id].code) || q.course_id }} | <strong>Question Type:</strong>
+                                    {{ q.question_type_id }}</p>
+                                <p class="text-muted small"><strong>LO Tag:</strong> {{ q.loTag }} | <strong>Cognitive Level:</strong> {{ q.cognitiveLevel || q.cognitiveTag }}</p>
+                                <p class="lead"><strong>Questions:</strong> {{ q.text }}</p>
+                                <p class="text-muted"><strong>Points:</strong> {{ q.points || 1 }}</p>
+
+                                <!-- Show remarks if any -->
+                                <div v-if="q.remarks && q.status === 'Draft'" class="alert alert-danger p-2 mt-3">
+                                    <strong>Remarks for revision:</strong><br>
+                                    <p class="mb-0 fst-italic">{{ q.remarks }}</p>
+                                </div>
+
+                                <hr>
+                                <!-- Answer Details -->
+                                <div v-if="q.question_type_id && q.question_type_id.toLowerCase().includes('multiple')">
+                                    <h6>Options:</h6>
+                                    <ul class="list-group">
+                                        <li v-for="(option, index) in q.options" :key="index" class="list-group-item"
+                                            :class="{ 'list-group-item-success': index === q.answerIndex }">
+                                            <span v-if="index === 0"><strong>Option A:</strong></span>
+                                            <span v-else-if="index === 1"><strong>Option B:</strong></span>
+                                            <span v-else-if="index === 2"><strong>Option C:</strong></span>
+                                            <span v-else-if="index === 3"><strong>Option D:</strong></span>
+                                            <span v-else-if="index === 4"><strong>Option E:</strong></span>
+                                            {{ option.text }} <span v-if="index === q.answerIndex"
+                                                class="badge bg-secondary float-end">Correct Answer</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div v-else-if="q.question_type_id === 'True or False' || q.question_type_id === 'Identification'">
+                                    <h6>Correct Answer:</h6>
+                                    <p><strong>{{ q.answer }}</strong></p>
+                                </div>
+                                <div v-else-if="q.question_type_id === 'Enumeration'">
+                                    <h6>Possible Answers:</h6>
+                                    <ul class="list-group">    
+                                        <li v-for="ans in q.answers" class="list-group-item">{{ ans }}</li>
+                                    </ul>
+                                </div>
+                                <div v-else-if="q.question_type_id === 'Matching Type'">
+                                    <h6>Matching Pairs:</h6>
+                                    <ul class="list-group">
+                                        <li v-for="pair in q.pairs" class="list-group-item">{{ pair.prompt }} <i
+                                                class="fas fa-long-arrow-alt-right"></i> {{ pair.answer }}</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="card-footer text-end">
+                                <!-- Faculty Actions -->
+                                <template
+                                    v-if="(currentUser.role === 'Faculty' || currentUser.role === 'Admin') && q.status === 'Draft'">
+                                    <button class="btn btn-sm btn-success me-2"
+                                        @click="handleUpdateStatus(q, 'Pending Validation')">Submit</button>
+                                    <button class="btn btn-sm btn-outline-secondary me-2"
+                                        @click="openQuestionModal(q)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                        @click="openDeleteConfirmation(q)">Delete</button>
+                                </template>
+                                <!-- Collecting Officer Actions -->
+                                <template
+                                    v-if="(currentUser.role === 'Collecting Officer' || currentUser.role === 'Admin') && q.status === 'Pending Validation'">
+                                    <button class="btn btn-sm btn-outline-secondary me-2"
+                                        @click="openQuestionModal(q)">Edit</button>
+                                    <button class="btn btn-sm btn-danger me-2"
+                                        @click="openInvalidModal(q)">Invalid</button>
+                                    <button class="btn btn-sm btn-success"
+                                        @click="handleUpdateStatus(q, 'Pending Approval')">Validate</button>
+                                </template>
+                                <!-- Review Committee Actions -->
+                                <template
+                                    v-if="(currentUser.role === 'Review Committee' || currentUser.role === 'Admin') && q.status === 'Pending Approval'">
+                                    <button class="btn btn-sm btn-outline-secondary me-2"
+                                        @click="openQuestionModal(q)">Edit</button>
+                                    <button class="btn btn-sm btn-danger me-2"
+                                        @click="handleUpdateStatus(q, 'Draft')">Disapprove</button>
+                                    <button class="btn btn-sm btn-success"
+                                        @click="handleUpdateStatus(q, 'Approved')">Approve</button>
+                                </template>
+                            </div>
+                        </div> <!-- End of card -->
+                    </div> 
