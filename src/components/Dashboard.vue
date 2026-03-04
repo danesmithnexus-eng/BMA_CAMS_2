@@ -194,7 +194,7 @@ export default {
         async startTest(test) {
              const ensured = await this.ensureTestReady(test.id);
              this.setActiveTest(ensured || test);
-             this.$router.push({ name: 'testTaking' });
+             this.$router.push({ name: 'testTaking', params: { id: test.id } });
         },
         
         viewStudentTestResult(test) {

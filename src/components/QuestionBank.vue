@@ -1,4 +1,3 @@
-
 <template>
     <div>
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
@@ -92,19 +91,23 @@
                         <div v-for="question in course.questions" :key="question.id" class="card mb-3">
                             <div class="card-header d-flex justify-content-between">
                                 <span>Question Preview</span>
-                                <span :class="getStatusBadge(formatStatus(question.status))">{{ formatStatus(question.status) }}</span>
+                                <span :class="getStatusBadge(formatStatus(question.status))">{{
+                                    formatStatus(question.status) }}</span>
                             </div>
                             <div class="card-body">
-                                    <p class="text-muted"><strong>Course:</strong> {{ course.course_name }} |
+                                <p class="text-muted"><strong>Course:</strong> {{ course.course_name }} |
                                     <strong>Question Type:</strong>
-                                    {{ formatQuestionType(question) }}</p>
-                                <p class="text-muted small"><strong>LO:</strong> {{ question.learning_outcome ?? '' }} | <strong>Cognitive
+                                    {{ formatQuestionType(question) }}
+                                </p>
+                                <p class="text-muted small"><strong>LO:</strong> {{ question.learning_outcome ?? '' }} |
+                                    <strong>Cognitive
                                         Level:</strong> {{ question.cognitive_level || '' }}</p>
                                 <p class="lead"><strong>Questions:</strong> {{ question.text }}</p>
                                 <p class="text-muted"><strong>Points:</strong> {{ question.points || 1 }}</p>
 
                                 <!-- Show remarks if any -->
-                                <div v-if="question.remarks && question.status === 'Draft'" class="alert alert-danger p-2 mt-3">
+                                <div v-if="question.remarks && question.status === 'Draft'"
+                                    class="alert alert-danger p-2 mt-3">
                                     <strong>Remarks for revision:</strong><br>
                                     <p class="mb-0 fst-italic">{{ question.remarks }}</p>
                                 </div>
@@ -113,7 +116,8 @@
                                 <!-- Answer Details -->
                                 <div v-if="isMultipleChoice(question)">
                                     <h6>Correct Answer:</h6>
-                                    <p><strong>{{ getCorrectOptionText(question.options, question.correctAnswerIndex) }}</strong></p>
+                                    <p><strong>{{ getCorrectOptionText(question.options, question.correctAnswerIndex)
+                                            }}</strong></p>
                                 </div>
                                 <div
                                     v-else-if="formatQuestionType(question) === 'True or False' || formatQuestionType(question) === 'Identification'">
@@ -123,7 +127,8 @@
                                 <div v-else-if="formatQuestionType(question) === 'Enumeration'">
                                     <h6>Possible Answers:</h6>
                                     <ul class="list-group">
-                                        <li v-for="ans in (Array.isArray(question.answer) ? question.answer : [])" class="list-group-item">{{ ans }}</li>
+                                        <li v-for="ans in (Array.isArray(question.answer) ? question.answer : [])"
+                                            class="list-group-item">{{ ans }}</li>
                                     </ul>
                                 </div>
                                 <div v-else-if="formatQuestionType(question) === 'Matching Type'">
@@ -161,7 +166,7 @@
                                     <button class="btn btn-sm btn-outline-secondary me-2"
                                         @click="openQuestionModal(question, course)">Edit</button>
                                     <button class="btn btn-sm btn-danger me-2"
-                                        @click="handleUpdateStatus(question, 'Draft')">Disapprove</button>
+                                        @click="openDisapproveModal(question)">Disapprove</button>
                                     <button class="btn btn-sm btn-success"
                                         @click="handleUpdateStatus(question, 'Approved')">Approve</button>
                                 </template>
@@ -193,7 +198,7 @@
                                         :disabled="editingQuestion.id">
                                         <option value="">Select Program</option>
                                         <option v-for="p in programOptions" :key="p.value" :value="p.value">{{ p.label
-                                        }}</option>
+                                            }}</option>
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
@@ -517,6 +522,32 @@
                 </div>
             </div>
         </Teleport>
+
+        <!-- Disapprove Remark Modal -->
+        <Teleport to="body">
+            <div class="modal fade" id="disapproveRemarkModal" tabindex="-1" ref="disapproveRemarkModal">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Disapprove Question</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Remark/Reason for disapproval</label>
+                                <textarea class="form-control" v-model="disapproveRemark" rows="3"
+                                    placeholder="Explain why this question is disapproved..."></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-danger" @click="confirmDisapprove">Disapprove
+                                Question</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </div>
 </template>
 
@@ -537,6 +568,8 @@ export default {
             questionToDelete: {},
             questionToInvalidate: null,
             invalidRemark: '',
+            questionToDisapprove: null,
+            disapproveRemark: '',
             uploadStatusMessage: '',
 
             // Modal Instances
@@ -550,6 +583,7 @@ export default {
             approveAllBsModal: null,
             rejectAllApprovalBsModal: null,
             invalidRemarkBsModal: null,
+            disapproveRemarkBsModal: null,
 
             // Constants
             loTags: ['LO 1.0', 'LO 1.1', 'LO 1.2', 'LO 1.3', 'LO 1.4', 'LO 1.5', 'LO 1.6', 'LO 1.7', 'LO 1.8', 'LO 1.9', 'LO 1.10', 'LO 1.11', 'LO 1.12', 'LO 1.13', 'LO 1.14', 'LO 1.15', 'LO 1.16', 'LO 1.17', 'LO 1.18', 'LO 1.19', 'LO 2.0', 'LO 2.1', 'LO 2.2', 'LO 2.3', 'LO 2.4', 'LO 2.5', 'LO 2.6', 'LO 2.7', 'LO 2.8', 'LO 2.9', 'LO 2.10', 'LO 2.11', 'LO 2.12', 'LO 2.13', 'LO 2.14', 'LO 2.15', 'LO 2.16', 'LO 2.17', 'LO 2.18', 'LO 2.19', 'LO 3.0', 'LO 3.1', 'LO 3.2', 'LO 3.3', 'LO 3.4', 'LO 3.5'],
@@ -589,7 +623,7 @@ export default {
                 if (isAdmin) return true;
                 if (isCollecting) return s === 'Pending Validation';
                 if (isReview) return s === 'Pending Approval';
-                if (isFaculty || isAssessor) return s === 'Draft' || s === 'Approved';
+                if (isFaculty || isAssessor) return s === 'Draft' || s === 'Approved' || s === 'Pending Validation' || s === 'Pending Approval';
                 return true;
             };
             return groups.map(g => ({
@@ -620,8 +654,8 @@ export default {
         getDbStatusCandidates(uiStatus) {
             switch (uiStatus) {
                 case 'Draft': return ['draft'];
-                case 'Pending Validation': return ['inactive', 'pending_validation'];
-                case 'Pending Approval': return ['inactive', 'pending_approval', 'validated'];
+                case 'Pending Validation': return ['pending_validation'];
+                case 'Pending Approval': return ['pending_approval'];
                 case 'Approved': return ['active', 'approved'];
                 case 'Rejected': return ['archived', 'rejected', 'invalid'];
                 default: return ['draft'];
@@ -653,20 +687,20 @@ export default {
         formatStatus(s) {
             const val = (s || '').toString().toLowerCase();
             if (val === 'draft') return 'Draft';
-            if (val === 'active') return 'Approved';
+            if (val === 'active' || val === 'approved') return 'Approved';
+            if (val === 'pending_validation' || val === 'pending validation') return 'Pending Validation';
+            if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
             if (val === 'inactive') return this.isCollecting() ? 'Pending Validation' : 'Pending Approval';
-            if (val === 'pending validation') return 'Pending Validation';
-            if (val === 'pending approval') return 'Pending Approval';
-            if (val === 'archived') return 'Rejected';
+            if (val === 'archived' || val === 'rejected' || val === 'invalid') return 'Rejected';
             return s || 'Draft';
         },
         canonicalStatus(s) {
             const val = (s || '').toString().toLowerCase();
             if (val === 'draft') return 'Draft';
-            if (val === 'active') return 'Approved';
+            if (val === 'active' || val === 'approved') return 'Approved';
+            if (val === 'pending_validation' || val === 'pending validation') return 'Pending Validation';
+            if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
             if (val === 'inactive') return 'Pending Validation';
-            if (val === 'pending validation') return 'Pending Validation';
-            if (val === 'pending approval' || val === 'validated') return 'Pending Approval';
             if (val === 'archived' || val === 'rejected' || val === 'invalid') return 'Rejected';
             return 'Draft';
         },
@@ -1004,10 +1038,10 @@ export default {
             };
             const statusMap = {
                 'Draft': 'draft',
-                'Pending Validation': 'inactive',
-                'Pending Approval': 'inactive',
+                'Pending Validation': 'pending_validation',
+                'Pending Approval': 'pending_approval',
                 'Approved': 'active',
-                'Rejected': 'inactive'
+                'Rejected': 'archived'
             };
             const payload = {
                 text: this.editingQuestion.text,
@@ -1448,7 +1482,7 @@ export default {
             return result;
         },
         openInvalidModal(question) {
-            this.questionToInvalidate = question;  
+            this.questionToInvalidate = question;
             this.invalidRemark = '';
             if (this.invalidRemarkBsModal) this.invalidRemarkBsModal.show();
         },
@@ -1479,6 +1513,38 @@ export default {
                 if (this.invalidRemarkBsModal) this.invalidRemarkBsModal.hide();
             })();
         },
+        openDisapproveModal(question) {
+            this.questionToDisapprove = question;
+            this.disapproveRemark = '';
+            if (this.disapproveRemarkBsModal) this.disapproveRemarkBsModal.show();
+        },
+        confirmDisapprove() {
+            if (!this.questionToDisapprove) {
+                if (this.disapproveRemarkBsModal) this.disapproveRemarkBsModal.hide();
+                return;
+            }
+            const q = this.questionToDisapprove;
+            let ok = true;
+            (async () => {
+                try {
+                    await api.put(`/questions/${q.id}`, { status: 'draft', remarks: this.disapproveRemark || '' });
+                } catch (e) {
+                    ok = false;
+                }
+                this.updateStatus(q.id, 'Draft', this.disapproveRemark || '');
+                for (let i = 0; i < this.courseList.length; i++) {
+                    const group = this.courseList[i];
+                    const idx = Array.isArray(group.questions) ? group.questions.findIndex(x => x.id === q.id) : -1;
+                    if (idx >= 0) {
+                        const item = group.questions[idx];
+                        group.questions.splice(idx, 1, { ...item, status: 'Draft', remarks: this.disapproveRemark || '' });
+                        break;
+                    }
+                }
+                this.showToast(ok ? 'Success' : 'Warning', ok ? 'Question returned to draft with remarks.' : 'Updated locally. Failed to update in database.', ok ? 'success' : 'warning');
+                if (this.disapproveRemarkBsModal) this.disapproveRemarkBsModal.hide();
+            })();
+        },
         openValidateAllConfirmation() { if (this.validateAllBsModal) this.validateAllBsModal.show(); },
         openRejectAllConfirmation() { if (this.rejectAllBsModal) this.rejectAllBsModal.show(); },
         openApproveAllConfirmation() { if (this.approveAllBsModal) this.approveAllBsModal.show(); },
@@ -1495,6 +1561,7 @@ export default {
         if (this.$refs.approveAllConfirmationModal) this.approveAllBsModal = new bootstrap.Modal(this.$refs.approveAllConfirmationModal);
         if (this.$refs.rejectAllApprovalConfirmationModal) this.rejectAllApprovalBsModal = new bootstrap.Modal(this.$refs.rejectAllApprovalConfirmationModal);
         if (this.$refs.invalidRemarkModal) this.invalidRemarkBsModal = new bootstrap.Modal(this.$refs.invalidRemarkModal);
+        if (this.$refs.disapproveRemarkModal) this.disapproveRemarkBsModal = new bootstrap.Modal(this.$refs.disapproveRemarkModal);
         if (typeof window !== 'undefined') {
             window.addEventListener('offline', this.handleOffline);
             window.addEventListener('online', this.handleOnline);
@@ -1518,6 +1585,7 @@ export default {
         if (this.approveAllBsModal) this.approveAllBsModal.dispose();
         if (this.rejectAllApprovalBsModal) this.rejectAllApprovalBsModal.dispose();
         if (this.invalidRemarkBsModal) this.invalidRemarkBsModal.dispose();
+        if (this.disapproveRemarkBsModal) this.disapproveRemarkBsModal.dispose();
         if (typeof window !== 'undefined') {
             window.removeEventListener('offline', this.handleOffline);
             window.removeEventListener('online', this.handleOnline);

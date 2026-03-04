@@ -61,7 +61,7 @@ const routes = [
         component: PilotAdmin
     },
     {
-        path: '/test-taking',
+        path: '/test-taking/:id?',
         name: 'testTaking',
         component: TestTaking
     },

@@ -429,6 +429,7 @@ export default {
       try {
         // Prepare user data for saving
         const userData = { ...this.editingUser };
+        const changedPassword = Boolean(userData.id && userData.password && String(userData.password).length > 0);
         
         // Remove any backend-computed fields that shouldn't be sent
         delete userData.yearAndClass;
@@ -446,7 +447,11 @@ export default {
         
         console.log('Sending user data to update:', userData);
         await this.saveUser(userData);
-        this.showToast('Success', userData.id ? 'User updated successfully.' : 'User added successfully.', 'success');
+        if (changedPassword) {
+          this.showNotification('Success', 'Password changed successfully.', 'success');
+        } else {
+          this.showToast('Success', userData.id ? 'User updated successfully.' : 'User added successfully.', 'success');
+        }
         if (this.userEditorBsModal) this.userEditorBsModal.hide();
       } catch (error) {
         console.error('Error saving user:', error);

@@ -74,7 +74,7 @@ export default {
         }
     },
     methods: {
-        ...mapActions(useTestStore, ['setSelectedReport', 'setSelectedStudentResult']),
+        ...mapActions(useTestStore, ['setSelectedReport', 'setSelectedStudentResult', 'fetchCompletedResultsForAssignments']),
         ...mapActions(useUIStore, ['showToast']),
         
         setView(viewName) {
@@ -128,6 +128,9 @@ export default {
             this.returnView = 'reportDetail';
             this.setView('studentResultDetail');
         }
+    },
+    mounted() {
+        this.fetchCompletedResultsForAssignments();
     }
 };
 </script>

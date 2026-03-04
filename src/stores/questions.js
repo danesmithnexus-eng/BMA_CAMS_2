@@ -38,7 +38,6 @@ export const useQuestionStore = defineStore('questions', {
     },
     actions: {
         addQuestion(question) {
-            // Ensure ID
             if (!question.id) question.id = Date.now();
             this.questions.push(question);
         },
@@ -55,7 +54,8 @@ export const useQuestionStore = defineStore('questions', {
             const q = this.questions.find(q => q.id === id);
             if (q) {
                 q.status = status;
-                if (remarks) q.remarks = remarks;
+                // Always update remarks — clears old remarks when resubmitting
+                q.remarks = remarks;
             }
         },
         setFilters(newFilters) {
@@ -77,8 +77,13 @@ export const useQuestionStore = defineStore('questions', {
                 }
             });
         },
-        clearAll() {
-            this.questions = [];
+        // FIX: only clears questions matching the given status, not everything
+        clearAll(status) {
+            if (status) {
+                this.questions = this.questions.filter(q => q.status !== status);
+            } else {
+                this.questions = [];
+            }
         }
     }
 });

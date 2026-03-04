@@ -677,7 +677,7 @@ export default {
                             if (existing) this.updateQuestion(payload);
                             else this.addQuestion(payload);
                         } else {
-                            this.showToast('Warning', `Failed to load question #${qid} for preview.`, 'warning');
+                           
                         }
                     }
                 }
