@@ -445,62 +445,6 @@ body {
     }
 }
 
-/* Styles from App.vue */
-:root {
-    --bg-dark: #f8f9fa;
-    --text-primary: #2c3e50;
-    --sidebar-width: 260px;
-}
-
-body {
-    background-color: var(--bg-dark);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    overflow-x: hidden;
-}
-
-#wrapper {
-    display: flex;
-    width: 100%;
-    align-items: stretch;
-    transition: all 0.3s ease;
-}
-
-#page-content-wrapper {
-    width: 100%;
-    min-height: 100vh;
-}
-
-/* Sidebar Toggle Transition */
-#wrapper.toggled #sidebar-wrapper {
-    margin-left: calc(-1 * var(--sidebar-width));
-}
-
-@media (min-width: 992px) {
-    #wrapper.toggled #sidebar-wrapper {
-        margin-left: calc(-1 * var(--sidebar-width));
-    }
-}
-
-@media (max-width: 991.98px) {
-    #wrapper.toggled #sidebar-wrapper {
-        margin-left: calc(-1 * var(--sidebar-width));
-    }
-    #wrapper:not(.toggled) #sidebar-wrapper {
-        margin-left: 0;
-    }
-}
-
-/* Overlay for Mobile */
-.overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 1029;
-}
-
 /* Utilities */
 .cursor-pointer { cursor: pointer; }
 
@@ -513,11 +457,3 @@ body {
 ::-webkit-scrollbar-track { background: #f1f1f1; }
 ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-
-/* Printable Area */
-@media print {
-    body * { visibility: hidden; }
-    .printable-area, .printable-area * { visibility: visible; }
-    .printable-area { position: absolute; left: 0; top: 0; width: 100%; }
-    .modal-footer, .btn-close { display: none !important; }
-}

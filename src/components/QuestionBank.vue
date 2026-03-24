@@ -101,12 +101,13 @@
                                 </p>
                                 <p class="text-muted small"><strong>LO:</strong> {{ question.learning_outcome ?? '' }} |
                                     <strong>Cognitive
-                                        Level:</strong> {{ question.cognitive_level || '' }}</p>
+                                        Level:</strong> {{ question.cognitive_level || '' }}
+                                </p>
                                 <p class="lead"><strong>Questions:</strong> {{ question.text }}</p>
                                 <p class="text-muted"><strong>Points:</strong> {{ question.points || 1 }}</p>
 
                                 <!-- Show remarks if any -->
-                                <div v-if="question.remarks && question.status === 'Draft'"
+                                <div v-if="question.remarks && formatStatus(question.status) === 'Draft'"
                                     class="alert alert-danger p-2 mt-3">
                                     <strong>Remarks for revision:</strong><br>
                                     <p class="mb-0 fst-italic">{{ question.remarks }}</p>
@@ -117,7 +118,7 @@
                                 <div v-if="isMultipleChoice(question)">
                                     <h6>Correct Answer:</h6>
                                     <p><strong>{{ getCorrectOptionText(question.options, question.correctAnswerIndex)
-                                            }}</strong></p>
+                                    }}</strong></p>
                                 </div>
                                 <div
                                     v-else-if="formatQuestionType(question) === 'True or False' || formatQuestionType(question) === 'Identification'">
@@ -198,7 +199,7 @@
                                         :disabled="editingQuestion.id">
                                         <option value="">Select Program</option>
                                         <option v-for="p in programOptions" :key="p.value" :value="p.value">{{ p.label
-                                            }}</option>
+                                        }}</option>
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
@@ -329,8 +330,14 @@
                                 </div>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Remarks</label>
-                                <textarea class="form-control" v-model="editingQuestion.remarks" rows="2"></textarea>
+                                <label class="form-label">
+                                    Remarks
+                                    <span v-if="isFaculty() && !isAdmin()"
+                                        class="text-muted small ms-1">(read-only)</span>
+                                </label>
+                                <textarea class="form-control" v-model="editingQuestion.remarks" rows="2"
+                                    :disabled="isFaculty() && !isAdmin()"
+                                    :class="{ 'bg-light text-muted': isFaculty() && !isAdmin() }"></textarea>
                             </div>
 
                         </div>
@@ -381,8 +388,9 @@
                             <div class="alert alert-info">
                                 <small>
                                     <i class="fas fa-info-circle me-2"></i>
-                                    CSV format: Program, Course, LO Tag, Question Type, Cognitive Level, Questions,
-                                    Points, Option A, Option B, Option C, Option D, Correct Answer
+                                    CSV format: Program, Course, Type, LO Tag, Question Text, Option A, Option B, Option
+                                    C,
+                                    Option D, Correct Answer, Points, CO Level
                                 </small>
                             </div>
                             <div v-if="uploadStatusMessage" class="mt-2 text-primary small">
@@ -426,7 +434,7 @@
                         <div class="modal-body">Are you sure you want to delete ALL draft questions?</div>
                         <div class="modal-footer"><button type="button" class="btn btn-secondary"
                                 data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger"
-                                @click="clearAll('Draft')">Delete All</button></div>
+                                @click="handleDeleteAll">Delete All</button></div>
                     </div>
                 </div>
             </div>
@@ -605,30 +613,28 @@ export default {
         ...mapState(useQuestionStore, ['questions', 'filters', 'filteredQuestions', 'groupedQuestions', 'hasDrafts', 'hasPendingValidation', 'hasPendingApproval']),
         ...mapState(useAuthStore, { currentUser: 'user' }),
 
-        filteredQuestionBank() {
-            return this.filteredQuestions;
-        },
-        groupedQuestionBank() {
-            return this.groupedQuestions;
-        },
+        filteredQuestionBank() { return this.filteredQuestions; },
+        groupedQuestionBank() { return this.groupedQuestions; },
         visibleCourseList() {
-            const groups = Array.isArray(this.courseList) ? this.courseList : [];
-            const isAdmin = this.isAdmin();
-            const isCollecting = this.isCollecting();
-            const isReview = this.isReview();
-            const isFaculty = this.isFaculty();
-            const isAssessor = this.isAssessor();
-            const filterFn = (q) => {
-                const s = this.formatStatus(q.status);
-                if (isAdmin) return true;
-                if (isCollecting) return s === 'Pending Validation';
-                if (isReview) return s === 'Pending Approval';
-                if (isFaculty || isAssessor) return s === 'Draft' || s === 'Approved' || s === 'Pending Validation' || s === 'Pending Approval';
-                return true;
+            const groups = this.courseList || [];
+            const roleFilters = {
+                'admin': () => true,
+                'collecting': (s) => s === 'Pending Validation',
+                'review': (s) => s === 'Pending Approval',
+                'faculty': (s) => ['Draft', 'Approved', 'Pending Validation', 'Pending Approval'].includes(s),
+                'assessor': (s) => ['Draft', 'Approved', 'Pending Validation', 'Pending Approval'].includes(s)
             };
+            const getFilter = () => {
+                if (this.isAdmin()) return roleFilters.admin;
+                if (this.isCollecting()) return roleFilters.collecting;
+                if (this.isReview()) return roleFilters.review;
+                if (this.isFaculty() || this.isAssessor()) return roleFilters.faculty;
+                return () => true;
+            };
+            const filterFn = getFilter();
             return groups.map(g => ({
                 ...g,
-                questions: Array.isArray(g.questions) ? g.questions.filter(filterFn) : []
+                questions: (g.questions || []).filter(q => filterFn(this.formatStatus(q.status)))
             })).filter(g => g.questions.length > 0);
         },
         allPrograms() { return ['Deck Operations', 'Navigation', 'Safety', 'ICT', 'MARLAW']; },
@@ -640,26 +646,22 @@ export default {
         ...mapActions(useQuestionStore, ['addQuestion', 'updateQuestion', 'deleteQuestion', 'updateStatus', 'setFilters', 'resetFilters', 'batchUpdateStatus', 'clearAll']),
         ...mapActions(useUIStore, ['showToast']),
 
-        toggleCourseGroup(course) {
-            this.expandedCourses[course] = !this.expandedCourses[course];
-        },
-        normalizeRole() {
-            return (this.currentUser?.role || '').toString().toLowerCase();
-        },
-        isAdmin() { const r = this.normalizeRole(); return r.includes('admin'); },
-        isFaculty() { const r = this.normalizeRole(); return r.includes('faculty'); },
-        isAssessor() { const r = this.normalizeRole(); return r.includes('assessor'); },
-        isCollecting() { const r = this.normalizeRole(); return r.includes('collecting'); },
-        isReview() { const r = this.normalizeRole(); return r.includes('review'); },
+        toggleCourseGroup(course) { this.expandedCourses[course] = !this.expandedCourses[course]; },
+        normalizeRole() { return (this.currentUser?.role || '').toString().toLowerCase(); },
+        isAdmin() { return this.normalizeRole().includes('admin'); },
+        isFaculty() { return this.normalizeRole().includes('faculty'); },
+        isAssessor() { return this.normalizeRole().includes('assessor'); },
+        isCollecting() { return this.normalizeRole().includes('collecting'); },
+        isReview() { return this.normalizeRole().includes('review'); },
         getDbStatusCandidates(uiStatus) {
-            switch (uiStatus) {
-                case 'Draft': return ['draft'];
-                case 'Pending Validation': return ['pending_validation'];
-                case 'Pending Approval': return ['pending_approval'];
-                case 'Approved': return ['active', 'approved'];
-                case 'Rejected': return ['archived', 'rejected', 'invalid'];
-                default: return ['draft'];
-            }
+            const map = {
+                'Draft': ['draft'],
+                'Pending Validation': ['pending_validation'],
+                'Pending Approval': ['pending_approval'],
+                'Approved': ['active', 'approved'],
+                'Rejected': ['archived', 'rejected', 'invalid']
+            };
+            return map[uiStatus] || ['draft'];
         },
         handleOffline() {
             this.isOnline = false;
@@ -671,38 +673,52 @@ export default {
             this.showToast('Success', 'Reconnected to the database.', 'success');
             this.connectionLost = false;
         },
-        isCourseExpanded(course) {
-            return !!this.expandedCourses[course];
-        },
+        isCourseExpanded(course) { return !!this.expandedCourses[course]; },
         getStatusBadge(status) {
-            switch (status) {
-                case 'Draft': return 'badge bg-secondary';
-                case 'Pending Validation': return 'badge bg-info text-dark';
-                case 'Pending Approval': return 'badge bg-primary';
-                case 'Approved': return 'badge bg-success';
-                case 'Rejected': return 'badge bg-danger';
-                default: return 'badge bg-light text-dark';
-            }
+            const badges = {
+                'Draft': 'badge bg-secondary',
+                'Pending Validation': 'badge bg-info text-dark',
+                'Pending Approval': 'badge bg-primary',
+                'Approved': 'badge bg-success',
+                'Rejected': 'badge bg-danger'
+            };
+            return badges[status] || 'badge bg-light text-dark';
         },
         formatStatus(s) {
             const val = (s || '').toString().toLowerCase();
-            if (val === 'draft') return 'Draft';
-            if (val === 'active' || val === 'approved') return 'Approved';
-            if (val === 'pending_validation' || val === 'pending validation') return 'Pending Validation';
-            if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
+            const map = {
+                'draft': 'Draft',
+                'active': 'Approved',
+                'approved': 'Approved',
+                'pending_validation': 'Pending Validation',
+                'pending validation': 'Pending Validation',
+                'pending_approval': 'Pending Approval',
+                'pending approval': 'Pending Approval',
+                'validated': 'Pending Approval',
+                'archived': 'Rejected',
+                'rejected': 'Rejected',
+                'invalid': 'Rejected'
+            };
             if (val === 'inactive') return this.isCollecting() ? 'Pending Validation' : 'Pending Approval';
-            if (val === 'archived' || val === 'rejected' || val === 'invalid') return 'Rejected';
-            return s || 'Draft';
+            return map[val] || (s || 'Draft');
         },
         canonicalStatus(s) {
             const val = (s || '').toString().toLowerCase();
-            if (val === 'draft') return 'Draft';
-            if (val === 'active' || val === 'approved') return 'Approved';
-            if (val === 'pending_validation' || val === 'pending validation') return 'Pending Validation';
-            if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
-            if (val === 'inactive') return 'Pending Validation';
-            if (val === 'archived' || val === 'rejected' || val === 'invalid') return 'Rejected';
-            return 'Draft';
+            const map = {
+                'draft': 'Draft',
+                'active': 'Approved',
+                'approved': 'Approved',
+                'pending_validation': 'Pending Validation',
+                'pending validation': 'Pending Validation',
+                'pending_approval': 'Pending Approval',
+                'pending approval': 'Pending Approval',
+                'validated': 'Pending Approval',
+                'inactive': 'Pending Validation',
+                'archived': 'Rejected',
+                'rejected': 'Rejected',
+                'invalid': 'Rejected'
+            };
+            return map[val] || 'Draft';
         },
         formatQuestionType(item) {
             const id = item?.question_type_id;
@@ -1078,14 +1094,16 @@ export default {
                 payload.answers = trimmed;
             }
             try {
-                const isEdit = !!(this.editingQuestion.id && this.questions.find(question => question.id === this.editingQuestion.id));
+                // Use strict ID presence check — don't rely on finding it in the Pinia store
+                // since fetchQuestions stores a simplified version that may not match by type
+                const isEdit = !!(this.editingQuestion.id);
                 let res;
                 if (isEdit) {
                     res = await api.put(`/questions/${this.editingQuestion.id}`, payload);
                 } else {
                     res = await api.post('/questions', payload);
                 }
-                const returned = res?.data?.question || {};
+                const returned = res?.data?.question || res?.data?.data || {};
                 const courseObj = this.coursesById[this.editingQuestion.course_id] || {};
                 const courseName = courseObj.name || courseObj.course_name || '';
                 const courseCode = courseObj.code || '';
@@ -1123,31 +1141,48 @@ export default {
                     this.addQuestion(uiItem);
                     this.showToast('Success', 'Question added to database.', 'success');
                 }
-                // Update grouped preview list to reflect options/correct answer
+
+                // Update courseList (card view) — replace if editing, push if new
                 const groupIdx = this.courseList.findIndex(g => Number(g.course_id) === Number(this.editingQuestion.course_id));
-                const newGroupQuestion = {
+                const updatedGroupQuestion = {
                     id: uiItem.id,
                     text: uiItem.text,
                     status: this.editingQuestion.status,
                     remarks: this.editingQuestion.remarks || null,
-                    question_type_id: 2,
+                    question_type_id: questionTypeMap[typeName] || 2,
                     cognitive_level_id: cognitiveMap[this.editingQuestion.cognitiveLevel] || 1,
-                    question_type: 'multiple',
+                    question_type: typeName,
                     course: courseName,
                     learning_outcome: this.learningOutcomeOptions.find(o => o.value === payload.learning_outcome_id)?.label || '',
                     cognitive_level: this.editingQuestion.cognitiveLevel,
                     creator: this.currentUser?.fullname || null,
                     options: optionsUi,
-                    correctAnswerIndex: correctIdxUi
+                    correctAnswerIndex: correctIdxUi,
+                    answer: uiItem.answer,
+                    answers: uiItem.answers,
+                    pairs: uiItem.pairs
                 };
-                if (groupIdx >= 0) {
-                    this.courseList[groupIdx].questions.push(newGroupQuestion);
+                if (isEdit) {
+                    // Replace existing question in courseList
+                    if (groupIdx >= 0) {
+                        const qIdx = this.courseList[groupIdx].questions.findIndex(q => Number(q.id) === Number(uiItem.id));
+                        if (qIdx >= 0) {
+                            this.courseList[groupIdx].questions.splice(qIdx, 1, updatedGroupQuestion);
+                        } else {
+                            this.courseList[groupIdx].questions.push(updatedGroupQuestion);
+                        }
+                    }
                 } else {
-                    this.courseList.push({
-                        course_id: this.editingQuestion.course_id,
-                        course_name: courseName || courseCode || String(this.editingQuestion.course_id),
-                        questions: [newGroupQuestion]
-                    });
+                    // Add new question to courseList
+                    if (groupIdx >= 0) {
+                        this.courseList[groupIdx].questions.push(updatedGroupQuestion);
+                    } else {
+                        this.courseList.push({
+                            course_id: this.editingQuestion.course_id,
+                            course_name: courseName || courseCode || String(this.editingQuestion.course_id),
+                            questions: [updatedGroupQuestion]
+                        });
+                    }
                 }
                 if (this.questionBsModal) this.questionBsModal.hide();
             } catch (err) {
@@ -1161,52 +1196,48 @@ export default {
         },
         async confirmDeleteQuestion() {
             const q = this.questionToDelete;
-            if (!q) {
-                if (this.deleteBsModal) this.deleteBsModal.hide();
-                return;
-            }
+            if (!q) { this.deleteBsModal?.hide(); return; }
+            
             let ok = true;
-            try {
-                await api.delete(`/questions/${q.id}`);
-            } catch (e) {
-                ok = false;
-            }
+            try { await api.delete(`/questions/${q.id}`); } catch (e) { ok = false; }
+            
             this.deleteQuestion(q.id);
+            // Remove from courseList
             for (let i = 0; i < this.courseList.length; i++) {
                 const group = this.courseList[i];
-                const idx = Array.isArray(group.questions) ? group.questions.findIndex(x => x.id === q.id) : -1;
+                const idx = group.questions?.findIndex(x => x.id === q.id) ?? -1;
                 if (idx >= 0) {
                     group.questions.splice(idx, 1);
                     if (!group.questions.length) this.courseList.splice(i, 1);
                     break;
                 }
             }
-            if (this.deleteBsModal) this.deleteBsModal.hide();
-            this.showToast(ok ? 'Success' : 'Warning', ok ? 'Question deleted.' : 'Deleted locally. Failed to delete in database.', ok ? 'success' : 'warning');
+            this.deleteBsModal?.hide();
+            const tone = ok ? 'success' : 'warning';
+            this.showToast(ok ? 'Success' : 'Warning', ok ? 'Question deleted.' : 'Deleted locally. Failed to delete in database.', tone);
         },
         async handleUpdateStatus(question, status) {
             const candidates = this.getDbStatusCandidates(status);
-            let ok = false;
-            let lastErr = null;
+            let ok = false, lastErr = null;
+            
             for (const s of candidates) {
                 try {
                     await api.put(`/questions/${question.id}`, { status: s });
-                    ok = true;
-                    break;
-                } catch (e) {
-                    lastErr = e;
-                }
+                    ok = true; break;
+                } catch (e) { lastErr = e; }
             }
+            
             this.updateStatus(question.id, status);
+            // Update courseList
             for (let i = 0; i < this.courseList.length; i++) {
                 const group = this.courseList[i];
-                const idx = Array.isArray(group.questions) ? group.questions.findIndex(x => x.id === question.id) : -1;
+                const idx = group.questions?.findIndex(x => x.id === question.id) ?? -1;
                 if (idx >= 0) {
-                    const q = group.questions[idx];
-                    group.questions.splice(idx, 1, { ...q, status });
+                    group.questions.splice(idx, 1, { ...group.questions[idx], status });
                     break;
                 }
             }
+            
             if (ok) {
                 this.showToast('Success', `Question status updated to ${status}.`, 'success');
             } else {
@@ -1214,33 +1245,133 @@ export default {
                 this.showToast('Warning', `Updated locally. ${msg}`, 'warning');
             }
         },
-        openSubmitAllConfirmation() { if (this.submitAllBsModal) this.submitAllBsModal.show(); },
-        handleSubmitAll() {
-            this.batchUpdateStatus('Draft', 'Pending Validation');
+        openSubmitAllConfirmation() { this.submitAllBsModal?.show(); },
+        getQuestionIdsByStatus(uiStatus) {
+            const ids = [];
+            (this.courseList || []).forEach(group => {
+                (group.questions || []).forEach(q => {
+                    if (this.formatStatus(q.status) === uiStatus) ids.push(q.id);
+                });
+            });
+            return ids;
+        },
+        async bulkApiUpdate(ids, dbStatus) {
+            const results = await Promise.allSettled(
+                ids.map(id => api.put(`/questions/${id}`, { status: dbStatus }))
+            );
+            const failed = results.filter(r => r.status === 'rejected').length;
+            return { total: ids.length, failed };
+        },
+        async handleSubmitAll() {
             if (this.submitAllBsModal) this.submitAllBsModal.hide();
-            this.showToast('Success', 'All drafts submitted for validation.', 'success');
+            const ids = this.getQuestionIdsByStatus('Draft');
+            if (!ids.length) return;
+            const { failed } = await this.bulkApiUpdate(ids, 'pending_validation');
+            this.batchUpdateStatus('Draft', 'Pending Validation');
+            this.courseList.forEach(group => {
+                group.questions.forEach(q => {
+                    if (this.formatStatus(q.status) === 'Draft') q.status = 'pending_validation';
+                });
+            });
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} draft(s) submitted for validation.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} submitted. ${failed} failed to update in database.`, 'warning');
+            }
         },
-        handleValidateAll() {
-            this.batchUpdateStatus('Pending Validation', 'Pending Approval');
+        async handleValidateAll() {
             if (this.validateAllBsModal) this.validateAllBsModal.hide();
-            this.showToast('Success', 'All pending questions validated.', 'success');
+            const ids = this.getQuestionIdsByStatus('Pending Validation');
+            if (!ids.length) return;
+            const { failed } = await this.bulkApiUpdate(ids, 'pending_approval');
+            this.batchUpdateStatus('Pending Validation', 'Pending Approval');
+            this.courseList.forEach(group => {
+                group.questions.forEach(q => {
+                    if (this.formatStatus(q.status) === 'Pending Validation') q.status = 'pending_approval';
+                });
+            });
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} question(s) validated.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} validated. ${failed} failed to update in database.`, 'warning');
+            }
         },
-        handleInvalidateAll() {
-            this.batchUpdateStatus('Pending Validation', 'Draft');
+        async handleInvalidateAll() {
             if (this.rejectAllBsModal) this.rejectAllBsModal.hide();
-            this.showToast('Success', 'All pending questions returned to draft.', 'success');
+            const ids = this.getQuestionIdsByStatus('Pending Validation');
+            if (!ids.length) return;
+            const { failed } = await this.bulkApiUpdate(ids, 'draft');
+            this.batchUpdateStatus('Pending Validation', 'Draft');
+            this.courseList.forEach(group => {
+                group.questions.forEach(q => {
+                    if (this.formatStatus(q.status) === 'Pending Validation') q.status = 'draft';
+                });
+            });
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} question(s) returned to draft.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} updated. ${failed} failed to update in database.`, 'warning');
+            }
         },
-        handleApproveAll() {
-            this.batchUpdateStatus('Pending Approval', 'Approved');
+        async handleApproveAll() {
             if (this.approveAllBsModal) this.approveAllBsModal.hide();
-            this.showToast('Success', 'All pending questions approved.', 'success');
+            const ids = this.getQuestionIdsByStatus('Pending Approval');
+            if (!ids.length) return;
+            const { failed } = await this.bulkApiUpdate(ids, 'active');
+            this.batchUpdateStatus('Pending Approval', 'Approved');
+            this.courseList.forEach(group => {
+                group.questions.forEach(q => {
+                    if (this.formatStatus(q.status) === 'Pending Approval') q.status = 'active';
+                });
+            });
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} question(s) approved.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} approved. ${failed} failed to update in database.`, 'warning');
+            }
         },
-        handleDisapproveAll() {
-            this.batchUpdateStatus('Pending Approval', 'Draft');
+        async handleDisapproveAll() {
             if (this.rejectAllApprovalBsModal) this.rejectAllApprovalBsModal.hide();
-            this.showToast('Success', 'All pending questions returned to draft.', 'success');
+            const ids = this.getQuestionIdsByStatus('Pending Approval');
+            if (!ids.length) return;
+            const { failed } = await this.bulkApiUpdate(ids, 'draft');
+            this.batchUpdateStatus('Pending Approval', 'Draft');
+            this.courseList.forEach(group => {
+                group.questions.forEach(q => {
+                    if (this.formatStatus(q.status) === 'Pending Approval') q.status = 'draft';
+                });
+            });
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} question(s) returned to draft.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} updated. ${failed} failed to update in database.`, 'warning');
+            }
         },
         openDeleteAllConfirmation() { if (this.deleteAllBsModal) this.deleteAllBsModal.show(); },
+        async handleDeleteAll() {
+            if (this.deleteAllBsModal) this.deleteAllBsModal.hide();
+            const ids = this.getQuestionIdsByStatus('Draft');
+            if (!ids.length) return;
+            const results = await Promise.allSettled(
+                ids.map(id => api.delete(`/questions/${id}`))
+            );
+            const failed = results.filter(r => r.status === 'rejected').length;
+            // Remove drafts from courseList
+            this.courseList.forEach(group => {
+                group.questions = Array.isArray(group.questions)
+                    ? group.questions.filter(q => this.formatStatus(q.status) !== 'Draft')
+                    : [];
+            });
+            // Remove now-empty course groups
+            this.courseList = this.courseList.filter(g => g.questions.length > 0);
+            // Sync Pinia store
+            this.clearAll('Draft');
+            if (failed === 0) {
+                this.showToast('Success', `${ids.length} draft question(s) deleted.`, 'success');
+            } else {
+                this.showToast('Warning', `${ids.length - failed} deleted. ${failed} failed to delete in database.`, 'warning');
+            }
+        },
         openBulkUploadModal() {
             this.uploadStatusMessage = '';
             if (this.bulkUploadBsModal) {
@@ -1253,7 +1384,6 @@ export default {
         },
         handleBulkUpload() {
             const fileInput = this.$refs.csvFileInput;
-            console.log('File input ref:', fileInput);
 
             if (!fileInput) {
                 this.showToast('Error', 'File input not found.', 'error');
@@ -1261,15 +1391,12 @@ export default {
             }
 
             const file = fileInput.files[0];
-            console.log('Selected file:', file);
-            console.log('Files in input:', fileInput.files);
 
             if (!file) {
                 this.showToast('Error', 'Please select a CSV file.', 'error');
                 return;
             }
 
-            // Check file type
             if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
                 this.showToast('Error', 'Please select a valid CSV file.', 'error');
                 return;
@@ -1278,28 +1405,23 @@ export default {
             this.uploadStatusMessage = 'Reading file...';
             const reader = new FileReader();
 
-            reader.onload = (e) => {
+            reader.onload = async (e) => {
                 const text = e.target.result;
-                console.log('File read successfully, length:', text.length);
-                console.log('First 200 chars:', text.substring(0, 200));
-                this.parseCSV(text);
+                await this.parseCSV(text);
             };
 
-            reader.onerror = (e) => {
-                console.error('File read error:', e);
+            reader.onerror = () => {
                 this.showToast('Error', 'Failed to read CSV file.', 'error');
                 this.uploadStatusMessage = '';
             };
 
             reader.onabort = () => {
-                console.log('File read aborted');
                 this.uploadStatusMessage = '';
             };
 
             try {
                 reader.readAsText(file);
             } catch (err) {
-                console.error('Error starting file read:', err);
                 this.showToast('Error', 'Could not read file: ' + err.message, 'error');
                 this.uploadStatusMessage = '';
             }
@@ -1356,104 +1478,190 @@ export default {
                 }
             }
         },
-        parseCSV(text) {
-            console.log('Parsing CSV, length:', text.length);
-            const lines = text.split('\n').filter(line => line.trim());
-            console.log('Total lines:', lines.length);
-            console.log('First line (header):', lines[0]);
-
+        async parseCSV(text) {
+            const lines = text.split(/\r?\n/).filter(line => line.trim());
             if (lines.length < 2) {
                 this.showToast('Error', 'CSV file is empty or has no data rows.', 'error');
                 this.uploadStatusMessage = '';
                 return;
             }
 
-            // Skip header row and parse data
+            const headerCells = this.parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim().toLowerCase());
+            const idxOf = (nameCandidates) => {
+                const arr = Array.isArray(nameCandidates) ? nameCandidates : [nameCandidates];
+                for (const n of arr) {
+                    const i = headerCells.indexOf(n.toLowerCase());
+                    if (i >= 0) return i;
+                }
+                return -1;
+            };
+
+            const idxProgram = idxOf(['program']);
+            const idxCourse = idxOf(['course']);
+            const idxType = idxOf(['type', 'question type']);
+            const idxLoTag = idxOf(['lo tag', 'learning outcome']);
+            const idxText = idxOf(['question text', 'text']);
+            const idxPoints = idxOf(['points']);
+            const idxOptA = idxOf(['option a']);
+            const idxOptB = idxOf(['option b']);
+            const idxOptC = idxOf(['option c']);
+            const idxOptD = idxOf(['option d']);
+            const idxAnswer = idxOf(['correct answer', 'answer']);
+            const idxCognitive = idxOf(['cognitive level', 'co level']);
+
+            const questionTypeMap = {
+                'true or false': 1,
+                'multiple choice': 2,
+                'matching type': 3,
+                'identification': 4,
+                'enumeration': 5
+            };
+            const cognitiveMap = {
+                'remembering': 1, 'understanding': 2, 'applying': 3,
+                'analyzing': 4, 'evaluating': 5, 'creating': 6
+            };
+
             const dataRows = lines.slice(1);
             let importedCount = 0;
+            let failedCount = 0;
+            let skippedCount = 0;
+            this.uploadStatusMessage = `Uploading 0 of ${dataRows.length}...`;
 
-            dataRows.forEach((line, index) => {
-                console.log(`Parsing line ${index + 1}:`, line);
-                // Parse CSV line handling quoted values
-                const columns = this.parseCSVLine(line);
-                console.log(`Line ${index + 1} columns:`, columns);
+            const normLO = (s) => {
+                const raw = (s || '').toString().trim();
+                const withSpace = raw.replace(/^(?:CLO|LO)[\s-]?/i, 'LO ');
+                return withSpace.toUpperCase();
+            };
 
-                if (columns.length >= 6) { // Need at least Program, Course, LO Tag, Type, Cognitive Level, Questions
-                    // New CSV format: Program, Course, LO Tag, Question Type, Cognitive Level, Questions, Points, Option A, Option B, Option C, Option D, Correct Answer
-                    const program = columns[0]?.trim() || '';
-                    const course = columns[1]?.trim() || '';
-                    // Normalize LO Tag format (e.g., "LO1.2" -> "LO 1.2")
-                    let loTag = columns[2]?.trim() || '';
-                    if (loTag) {
-                        // Add space after "LO" if missing (e.g., LO1.0 -> LO 1.0)
-                        loTag = loTag.replace(/^(LO)(\d)/i, '$1 $2');
-                    }
-                    const typeRaw = columns[3]?.trim() || 'Multiple Choice';
-                    // Normalize type to proper format
-                    let type = 'Multiple Choice';
-                    if (typeRaw.toLowerCase().includes('multiple')) type = 'Multiple Choice';
-                    else if (typeRaw.toLowerCase().includes('true') || typeRaw.toLowerCase().includes('false')) type = 'True or False';
-                    else if (typeRaw.toLowerCase().includes('identification')) type = 'Identification';
-                    else if (typeRaw.toLowerCase().includes('matching')) type = 'Matching Type';
-                    else if (typeRaw.toLowerCase().includes('enumeration')) type = 'Enumeration';
-                    const cognitiveLevel = columns[4]?.trim() || '';
-                    const questionText = columns[5]?.trim() || '';
-                    const points = parseInt(columns[6]) || 1;
+            for (let index = 0; index < dataRows.length; index++) {
+                const columns = this.parseCSVLine(dataRows[index]);
+                const get = (idx) => (idx >= 0 && idx < columns.length) ? (columns[idx] || '').trim() : '';
 
-                    if (!questionText) {
-                        console.log(`Line ${index + 1} skipped: empty question text`);
-                        return;
-                    }
+                const programLabel = get(idxProgram);
+                const courseCode = get(idxCourse);
+                const typeRaw = get(idxType);
+                const loTagRaw = get(idxLoTag);
+                const questionText = get(idxText);
+                const pointsRaw = get(idxPoints);
+                const optionA = get(idxOptA);
+                const optionB = get(idxOptB);
+                const optionC = get(idxOptC);
+                const optionD = get(idxOptD);
+                const correctRaw = get(idxAnswer);
+                const cogLevelRaw = get(idxCognitive);
 
-                    // Parse correct answer (can be A, B, C, D, E or 0, 1, 2, 3, 4)
-                    let correctAnswerIndex = 0;
-                    const correctRaw = columns[11]?.trim().toUpperCase();
-                    if (correctRaw === 'A' || correctRaw === '0') correctAnswerIndex = 0;
-                    else if (correctRaw === 'B' || correctRaw === '1') correctAnswerIndex = 1;
-                    else if (correctRaw === 'C' || correctRaw === '2') correctAnswerIndex = 2;
-                    else if (correctRaw === 'D' || correctRaw === '3') correctAnswerIndex = 3;
-                    else if (correctRaw === 'E' || correctRaw === '4') correctAnswerIndex = 4;
+                if (!questionText) { skippedCount++; continue; }
 
-                    const question = {
-                        id: Date.now() + index,
-                        program: program,
-                        course_id: course,
-                        loTag: loTag,
-                        question_type_id: type,
-                        cognitiveLevel: cognitiveLevel,
-                        text: questionText,
-                        points: points,
-                        options: [
-                            { text: columns[7]?.trim() || '' },
-                            { text: columns[8]?.trim() || '' },
-                            { text: columns[9]?.trim() || '' },
-                            { text: columns[10]?.trim() || '' },
-                        ],
-                        correctAnswerIndex: correctAnswerIndex,
-                        correctAnswer: correctRaw,
-                        status: 'Draft',
-                        author: this.currentUser?.fullname || 'Unknown',
-                        createdAt: new Date().toISOString()
-                    };
+                const typeNorm = typeRaw.toLowerCase();
+                let typeStr = 'multiple choice';
+                if (typeNorm.includes('true') || typeNorm.includes('false')) typeStr = 'true or false';
+                else if (typeNorm.includes('identification')) typeStr = 'identification';
+                else if (typeNorm.includes('matching')) typeStr = 'matching type';
+                else if (typeNorm.includes('enumeration')) typeStr = 'enumeration';
+                else if (typeNorm.includes('multiple')) typeStr = 'multiple choice';
 
-                    console.log(`Adding question ${index + 1}:`, question);
-                    this.addQuestion(question);
-                    importedCount++;
-                    console.log(`Question ${index + 1} added. Total imported: ${importedCount}`);
-                } else {
-                    console.log(`Line ${index + 1} skipped: only ${columns.length} columns found, need at least 6`);
+                const courseMatches = this.courseIdOptions.filter(opt => opt.label.toLowerCase() === courseCode.toLowerCase());
+                let courseId = (courseMatches[0] && courseMatches[0].value) || null;
+                if (courseMatches.length > 1 && programLabel) {
+                    const found = courseMatches.find(opt => {
+                        const c = this.coursesById[opt.value];
+                        const pname = (c?.program && typeof c.program === 'object') ? c.program.name : (typeof c?.program === 'string' ? c.program : '');
+                        return pname && pname.toLowerCase().includes(programLabel.toLowerCase());
+                    });
+                    if (found) courseId = found.value;
                 }
-            });
+                if (!courseId) { skippedCount++; continue; }
 
+                const loTag = normLO(loTagRaw);
+                const courseObj = this.coursesById[courseId] || {};
+                const allLOs = [];
+                (courseObj.courseOutcomes || courseObj.course_outcomes || []).forEach(co => {
+                    (co.learningOutcomes || co.learning_outcomes || []).forEach(lo => {
+                        allLOs.push({ id: lo.id, code: (lo.code || '').toUpperCase() });
+                    });
+                });
+                const loMatch = allLOs.find(lo => lo.code === loTag);
+                const learningOutcomeId = loMatch?.id || allLOs[0]?.id || null;
+                if (!learningOutcomeId) { skippedCount++; continue; }
+
+                const points = Number.parseInt(pointsRaw) || 1;
+                const cogNorm = (cogLevelRaw || 'Remembering').toLowerCase();
+                const payload = {
+                    text: questionText,
+                    status: 'draft',
+                    question_type_id: questionTypeMap[typeStr] || 2,
+                    course_id: courseId,
+                    learning_outcome_id: learningOutcomeId,
+                    cognitive_level_id: cognitiveMap[cogNorm] || 1,
+                    points
+                };
+
+                if (payload.question_type_id === 2) {
+                    const options = [optionA, optionB, optionC, optionD].filter(Boolean);
+                    if (options.length < 2) { skippedCount++; continue; }
+                    const upper = correctRaw.toUpperCase();
+                    let correctIndex = 0;
+                    if (upper === 'B' || upper === '1') correctIndex = 1;
+                    else if (upper === 'C' || upper === '2') correctIndex = 2;
+                    else if (upper === 'D' || upper === '3') correctIndex = 3;
+                    else {
+                        const m = options.findIndex(o => o.toLowerCase() === correctRaw.toLowerCase());
+                        if (m >= 0) correctIndex = m;
+                    }
+                    payload.answers = options.map((text, i) => ({
+                        option_text: text,
+                        option_order: i + 1,
+                        is_correct: i === correctIndex
+                    }));
+                }
+                if (payload.question_type_id === 1) {
+                    const ans = (correctRaw || '').toString().trim().toLowerCase();
+                    payload.correct_answer = ans === 'true' || ans === '1';
+                }
+                if (payload.question_type_id === 4) {
+                    payload.correct_answer = correctRaw || '';
+                }
+
+                try {
+                    this.uploadStatusMessage = `Uploading ${index + 1} of ${dataRows.length}...`;
+                    const res = await api.post('/questions', payload);
+                    const returned = res?.data?.question || res?.data?.data || {};
+                    const courseCodeLabel = (this.courseIdOptions.find(o => Number(o.value) === Number(courseId))?.label || courseCode);
+                    const uiItem = {
+                        id: returned.id || Date.now() + index,
+                        text: payload.text,
+                        question_type_id: typeStr,
+                        course_id: courseId,
+                        status: 'Draft',
+                        remarks: '',
+                        options: Array.isArray(payload.answers) ? payload.answers.map(a => ({ text: a.option_text })) : [],
+                        correctAnswerIndex: Array.isArray(payload.answers) ? payload.answers.findIndex(a => a.is_correct) : 0,
+                        learning_outcome: loTag,
+                        cognitive_level: cogLevelRaw || 'Remembering'
+                    };
+                    this.addQuestion(uiItem);
+                    const groupIdx = this.courseList.findIndex(g => Number(g.course_id) === Number(courseId));
+                    if (groupIdx >= 0) {
+                        this.courseList[groupIdx].questions.push(uiItem);
+                    } else {
+                        this.courseList.push({ course_id: courseId, course_name: courseCodeLabel, questions: [uiItem] });
+                    }
+                    importedCount++;
+                } catch (e) {
+                    failedCount++;
+                }
+            }
+
+            this.uploadStatusMessage = '';
             if (importedCount > 0) {
-                this.showToast('Success', `${importedCount} questions imported successfully.`, 'success');
-                this.uploadStatusMessage = '';
+                let msg = `${importedCount} question(s) imported successfully.`;
+                if (failedCount > 0) msg += ` ${failedCount} failed.`;
+                if (skippedCount > 0) msg += ` ${skippedCount} skipped (unrecognized course/LO).`;
+                this.showToast(failedCount > 0 ? 'Warning' : 'Success', msg, failedCount > 0 ? 'warning' : 'success');
                 if (this.bulkUploadBsModal) this.bulkUploadBsModal.hide();
-                // Clear file input
                 if (this.$refs.csvFileInput) this.$refs.csvFileInput.value = '';
             } else {
-                this.showToast('Error', 'No valid questions found in CSV file.', 'error');
-                this.uploadStatusMessage = '';
+                this.showToast('Error', `No questions imported. ${skippedCount} skipped, ${failedCount} failed.`, 'error');
             }
         },
         parseCSVLine(line) {

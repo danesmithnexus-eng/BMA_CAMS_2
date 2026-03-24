@@ -1,0 +1,18 @@
+{
+  "appId": "cams.bma.edu.ph",
+  "appName": "bma-cams-vue",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "hostname": "app.localhost",
+    "androidScheme": "http"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchAutoHide": false
+    }
+  }
+}

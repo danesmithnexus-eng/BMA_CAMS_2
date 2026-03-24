@@ -25,39 +25,27 @@ export default {
         ...mapState(useAuthStore, { currentUser: 'user' }),
         ...mapState(useLayoutStore, ['isSidebarActive']),
         ...mapState(useUIStore, { uiToast: 'toast' }),
-        isPilotAdmin() {
-            return this.$route.name === 'pilotAdmin' || this.$route.name === 'manageTest';
-        }
+        isPilotAdmin() { return ['pilotAdmin', 'manageTest'].includes(this.$route.name); }
     },
     methods: {
         ...mapActions(useAuthStore, ['logout']),
         ...mapActions(useLayoutStore, ['setSidebarActive', 'toggleSidebar']),
         ...mapActions(useUIStore, ['hideToast']),
         
-        toggleProfileDropdown() {
-            this.isProfileDropdownOpen = !this.isProfileDropdownOpen;
-        },
+        toggleProfileDropdown() { this.isProfileDropdownOpen = !this.isProfileDropdownOpen; },
         closeProfileDropdown(event) {
             if (this.isProfileDropdownOpen && !event.target.closest('.dropdown')) {
                 this.isProfileDropdownOpen = false;
             }
         },
-        handleResize() {
-            const currentWidth = window.innerWidth;
-            const breakpoint = 992;
-            if (currentWidth >= breakpoint) {
-                this.setSidebarActive(true);
-            } else {
-                this.setSidebarActive(false);
-            }
-        },
+        handleResize() { this.setSidebarActive(window.innerWidth >= 992); },
         handleLogout() { 
             this.isProfileDropdownOpen = false;
-            if (this.logoutConfirmationBsModal) this.logoutConfirmationBsModal.show();
+            this.logoutConfirmationBsModal?.show();
         },
         confirmLogout() {
             this.logout();
-            if (this.logoutConfirmationBsModal) this.logoutConfirmationBsModal.hide();
+            this.logoutConfirmationBsModal?.hide();
         }
     },
     mounted() {
@@ -66,39 +54,20 @@ export default {
         window.addEventListener('resize', this.handleResize);
         if (this.$refs.appToast) {
             this.appToastInstance = bootstrap.Toast.getOrCreateInstance(this.$refs.appToast);
-            this.$refs.appToast.addEventListener('hidden.bs.toast', () => {
-                this.hideToast();
-            });
+            this.$refs.appToast.addEventListener('hidden.bs.toast', () => this.hideToast());
         }
-        
-        // Initial resize check
         this.handleResize();
     },
     beforeUnmount() {
         window.removeEventListener('click', this.closeProfileDropdown);
         window.removeEventListener('resize', this.handleResize);
-        if (this.logoutConfirmationBsModal) {
-            this.logoutConfirmationBsModal.dispose();
-        }
-        if (this.appToastInstance) {
-            this.appToastInstance.dispose();
-            this.appToastInstance = null;
-        }
+        this.logoutConfirmationBsModal?.dispose();
+        this.appToastInstance?.dispose();
     },
     watch: {
-        'uiToast.visible'(val) {
-            if (val && this.appToastInstance) {
-                this.appToastInstance.show();
-            }
-        },
-        'uiToast.title'() {
-            if (this.uiToast.visible && this.appToastInstance) this.appToastInstance.show();
-        },
-        'uiToast.message'() {
-            if (this.uiToast.visible && this.appToastInstance) this.appToastInstance.show();
-        },
-        'uiToast.class'() {
-            if (this.uiToast.visible && this.appToastInstance) this.appToastInstance.show();
+        'uiToast': {
+            handler() { if (this.uiToast.visible && this.appToastInstance) this.appToastInstance.show(); },
+            deep: true
         }
     }
 };
