@@ -9,10 +9,11 @@ import Reports from '../components/Reports.vue';
 import StudentDashboard from '../components/StudentDashboard.vue';
 import TestBuilder from '../components/TestBuilder.vue';
 import PilotAdmin from '../components/PilotAdmin.vue';
-import TestTaking from '../components/TestTaking.vue';
+import TakeTest from '../views/TakeTest.vue';
 import UserManagement from '../components/UserManagement.vue';
 import Archives from '../components/Archives.vue';
 import Courses from '../components/Courses.vue';
+import FacultyDashboard from '../components/FacultyDashboard.vue';
 
 const routes = [
     {
@@ -46,6 +47,11 @@ const routes = [
         component: StudentDashboard
     },
     {
+        path: '/faculty',
+        name: 'facultyDashboard',
+        component: FacultyDashboard
+    },
+    {
         path: '/test-builder',
         name: 'testBuilder',
         component: TestBuilder
@@ -61,14 +67,14 @@ const routes = [
         component: PilotAdmin
     },
     {
-        path: '/test-taking/:id?',
+        path: '/test-taking/:id/:aid?',
         name: 'testTaking',
-        component: TestTaking
+        component: TakeTest
     },
     {
         path: '/test-review',
         name: 'testReview',
-        component: TestTaking
+        component: TakeTest
     },
     {
         path: '/reports/detail',
@@ -109,12 +115,46 @@ router.beforeEach((to, from, next) => {
 
     // If logged in and trying to access login page, redirect to dashboard
     if (to.name === 'login' && authStore.isAuthenticated) {
+        if (['Student'].includes(authStore.user.role)) {
+            return next('/student');
+        }
+        if (['Faculty'].includes(authStore.user.role)) {
+            return next('/faculty');
+        }
         return next('/dashboard');
     }
 
     // If auth required and not logged in, redirect to login
     if (authRequired && !authStore.isAuthenticated) {
         return next('/login');
+    }
+
+    // Role-based access control
+    if (authStore.isAuthenticated) {
+        const role = authStore.user.role;
+
+        // Student and Faculty can only access student-related pages
+        if (['Student'].includes(role)) {
+            const studentRoutes = ['studentDashboard', 'testTaking', 'testReview', 'studentResultDetail'];
+            if (!studentRoutes.includes(to.name)) {
+                return next('/student');
+            }
+        }
+
+        if (['Faculty'].includes(role)) {
+            const facultyRoutes = ['facultyDashboard', 'testTaking', 'testReview', 'studentResultDetail'];
+            if (!facultyRoutes.includes(to.name)) {
+                return next('/faculty');
+            }
+        }
+
+        // Assessor can access everything except User Management
+        if (role === 'Assessor') {
+            const forbiddenRoutes = ['userManagement'];
+            if (forbiddenRoutes.includes(to.name)) {
+                return next('/dashboard');
+            }
+        }
     }
 
     next();

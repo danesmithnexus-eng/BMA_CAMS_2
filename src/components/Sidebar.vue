@@ -13,6 +13,14 @@
                     </a>
                 </li>
             </template>
+            <template v-else-if="currentUser.role === 'Faculty'">
+                <li class="nav-item">
+                    <a class="nav-link" :class="{ active: currentView === 'facultyDashboard' }"
+                        @click="setView('facultyDashboard')">
+                        <i class="fas fa-tasks fa-fw"></i> My Assigned Tests
+                    </a>
+                </li>
+            </template>
             <template v-else>
                 <li class="nav-item">
                     <a class="nav-link" :class="{ active: currentView === 'dashboard' }" @click="setView('dashboard')">
@@ -31,19 +39,19 @@
                         <i class="fas fa-book fa-fw"></i> Courses
                     </a>
                 </li>
-                <li class="nav-item" v-if="['Faculty', 'Admin', 'Assessor'].includes(currentUser.role)">
+                <li class="nav-item" v-if="['Admin', 'Assessor'].includes(currentUser.role)">
                     <a class="nav-link" :class="{ active: currentView === 'testBuilder' }"
                         @click="setView('testBuilder')">
                         <i class="fas fa-file-alt fa-fw"></i> Test Builder
                     </a>
                 </li>
-                <li class="nav-item" v-if="['Faculty', 'Admin', 'Assessor'].includes(currentUser.role)">
+                <li class="nav-item" v-if="['Admin', 'Assessor'].includes(currentUser.role)">
                     <a class="nav-link" :class="{ active: currentView === 'pilotAdmin' }"
                         @click="setView('pilotAdmin')">
                         <i class="fas fa-cogs fa-fw"></i> Pilot Administration
                     </a>
                 </li>
-                <li class="nav-item" v-if="['Faculty', 'Admin', 'Assessor'].includes(currentUser.role)">
+                <li class="nav-item" v-if="['Admin', 'Assessor'].includes(currentUser.role)">
                     <a class="nav-link" :class="{ active: currentView === 'reports' }" @click="setView('reports')">
                         <i class="fas fa-chart-pie fa-fw"></i> Reports & Analysis
                     </a>

@@ -6,16 +6,20 @@ import { useTestStore } from '../stores/tests';
 import { useUserStore } from '../stores/users';
 import { useQuestionStore } from '../stores/questions';
 import { useUIStore } from '../stores/ui';
+import StudentResultReview from './StudentResultReview.vue';
+import FacultyResultReview from './FacultyResultReview.vue';
 
 export default {
     name: 'Reports',
+    components: { StudentResultReview, FacultyResultReview },
 
     data: () => ({
         reportsViewTab: 'tests',
         reportTab: 'overall',
         returnView: 'reportDetail',
         cognitiveLevels: ['Remembering', 'Understanding', 'Applying', 'Analyzing', 'Evaluating', 'Creating'],
-        loading: false
+        loading: false,
+        _cachedReport: null
     }),
 
     computed: {
@@ -27,99 +31,217 @@ export default {
         currentView() { return this.$route.name; },
 
         completedStudentTests() {
-            // Source from the new performance report if available
-            if (this.studentPerformanceReport?.length) {
-                return this.studentPerformanceReport.filter(st => {
-                    const s = String(st.status ?? '').toLowerCase();
-                    return s === 'completed' || s === 'complete' || s === 'done';
-                }).map(st => {
-                    const scoreVal = parseInt(String(st.score).replace(/[^\d]/g, ''));
-                    const durationVal = parseInt(st.time_spent);
-                    
-                    // Crucial: Resolve the correct testId by matching exam_name if ID is missing or ambiguous
-                    let resolvedTestId = st.exam_id || st.testId || st.test_id;
-                    if (!resolvedTestId && st.exam_name) {
-                        const match = this.pilotTests.find(t => (t.name || '').toLowerCase() === st.exam_name.toLowerCase());
-                        if (match) resolvedTestId = match.id;
-                    }
-                    // If still missing, fallback to st.id (which might be an assignment ID)
-                    if (!resolvedTestId) resolvedTestId = st.id;
+            const results = [];
+            const seen = new Set();
 
-                    return {
+            if (Array.isArray(this.studentPerformanceReport) && this.studentPerformanceReport.length) {
+                for (const st of this.studentPerformanceReport) {
+                    const s = String(st.status ?? '').toLowerCase().trim();
+                    if (!['completed', 'complete', 'done'].includes(s)) continue;
+
+                    const aid = Number(st.assignment_id || st.assignmentId || 0);
+                    if (aid && seen.has(aid)) continue;
+                    if (aid) seen.add(aid);
+
+                    let testId = Number(st.exam_id || st.testId || st.test_id || 0);
+                    if (!testId && st.exam_name) {
+                        const match = this.pilotTests.find(
+                            t => (t.name || '').toLowerCase() === String(st.exam_name).toLowerCase()
+                        );
+                        if (match) testId = match.id;
+                    }
+
+                    let score = null;
+                    const rawScoreStr = String(st.score ?? '').trim();
+                    if (rawScoreStr.includes('%')) {
+                        score = parseInt(rawScoreStr);
+                    } else if (rawScoreStr.includes('/')) {
+                        const [num, den] = rawScoreStr.split('/').map(Number);
+                        score = den > 0 ? Math.round((num / den) * 100) : 0;
+                    } else if (rawScoreStr !== '' && !isNaN(Number(rawScoreStr))) {
+                        const n = Number(rawScoreStr);
+                        score = n <= 100 ? Math.round(n) : null;
+                    }
+
+                    let durationSeconds = 0;
+                    const ts = st.time_spent;
+                    if (ts != null && ts !== '') {
+                        if (typeof ts === 'number') {
+                            durationSeconds = ts;
+                        } else if (String(ts).includes(':')) {
+                            const parts = String(ts).split(':').map(Number);
+                            if (parts.length === 3) durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                            else if (parts.length === 2) durationSeconds = parts[0] * 60 + parts[1];
+                        } else {
+                            durationSeconds = parseInt(ts) || 0;
+                        }
+                    }
+
+                    const rawScoreVal = (() => {
+                        const r = String(st.raw_score ?? '');
+                        if (r.includes('/')) return parseInt(r.split('/')[0]);
+                        const n = Number(st.raw_score ?? st.correct_count ?? '');
+                        return !isNaN(n) && n >= 0 ? n : null;
+                    })();
+
+                    const totalQuestionsVal = (() => {
+                        const r = String(st.raw_score ?? '');
+                        if (r.includes('/')) return parseInt(r.split('/')[1]);
+                        const n = Number(st.total_questions ?? st.total ?? st.exam_questions ?? '');
+                        return !isNaN(n) && n > 0 ? n : null;
+                    })();
+
+                    results.push({
                         ...st,
-                        testId: resolvedTestId,
-                        score: isNaN(scoreVal) ? 0 : scoreVal,
-                        durationSeconds: isNaN(durationVal) ? 0 : durationVal,
-                        completedAt: st.completed_at
-                    };
+                        testId,
+                        assignmentId: aid || undefined,
+                        studentId: Number(st.student_id || st.studentId || st.user_id || 0),
+                        student_id: Number(st.student_id || st.studentId || st.user_id || 0),
+                        score,
+                        rawScore: rawScoreVal,
+                        totalQuestions: totalQuestionsVal,
+                        durationSeconds,
+                        completedAt: st.completed_at || st.completedAt || null,
+                    });
+                }
+            }
+
+            for (const st of (this.studentTests || [])) {
+                const s = String(st.status ?? '').toLowerCase().trim();
+                if (!['completed', 'complete', 'done'].includes(s)) continue;
+
+                const aid = Number(st.assignmentId || 0);
+                if (aid && seen.has(aid)) continue;
+                if (aid) seen.add(aid);
+
+                results.push({
+                    ...st,
+                    score: st.score != null ? Math.round(Number(st.score)) : null,
+                    durationSeconds: Number(st.durationSeconds || 0),
+                    rawScore: st.rawScore ?? st.raw_score ?? null,
+                    totalQuestions: st.totalQuestions ?? st.total_questions ?? null,
+                    studentId: Number(st.studentId || st.student_id || st.user_id || 0),
+                    student_id: Number(st.student_id || st.studentId || st.user_id || 0),
                 });
             }
 
-            // Fallback to legacy studentTests
-            return (this.studentTests || []).filter(st => {
-                const s = String(st.status ?? '').toLowerCase();
-                return s === 'completed' || s === 'complete' || s === 'done';
-            });
+            return results;
         },
 
         completedTests() {
-            // Group by testId or exam_name
             const entries = this.completedStudentTests;
             if (!entries.length) return [];
 
-            const groups = entries.reduce((acc, st) => {
-                // Prefer testId if it's a real ID from pilotTests, otherwise group by name
-                const key = st.testId || st.exam_name;
-                if (!acc[key]) acc[key] = [];
-                acc[key].push(st);
-                return acc;
-            }, {});
+            const groups = new Map();
+            for (const st of entries) {
+                const key = st.testId || st.exam_name || 'unknown';
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(st);
+            }
 
-            return Object.entries(groups).map(([key, results]) => {
-                const tid = parseInt(key);
-                // Try to find the test object in pilotTests
-                const test = (isNaN(tid) ? 
-                    this.pilotTests.find(t => (t.name || '').toLowerCase() === String(key).toLowerCase()) :
-                    this.pilotTests.find(t => Number(t.id) === tid)) || {};
-                
+            return Array.from(groups.entries()).map(([key, results]) => {
+                const tid = typeof key === 'number' ? key : parseInt(key);
+                const test = (!isNaN(tid) && tid > 0)
+                    ? (this.pilotTests.find(t => Number(t.id) === tid) || {})
+                    : (this.pilotTests.find(t => (t.name || '').toLowerCase() === String(key).toLowerCase()) || {});
+
                 const n = results.length;
-                const avg = arr => n ? arr.reduce((s, x) => s + (Number(x) || 0), 0) / n : 0;
-                
+                const validScores = results.map(r => r.score).filter(s => s != null && !isNaN(s));
+                const avgScore = validScores.length
+                    ? Number((validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1))
+                    : null;
+
+                const validDurations = results.map(r => r.durationSeconds).filter(d => d > 0);
+                const avgDurationSeconds = validDurations.length
+                    ? validDurations.reduce((a, b) => a + b, 0) / validDurations.length
+                    : 0;
+
+                const completions = results.map(r => r.completedAt).filter(Boolean).sort();
+
                 return {
                     ...test,
-                    id: test.id || results[0].testId || key,
-                    name: test.name || results[0].exam_name || `Exam ${key}`,
+                    id: test.id || tid || key,
+                    name: test.name || results[0]?.exam_name || `Exam ${key}`,
+                    description: test.description || '',
                     participants: n,
-                    avgScore: Number(avg(results.map(r => r.score)).toFixed(1)),
-                    avgDurationSeconds: avg(results.map(r => r.durationSeconds)),
-                    latestCompletion: results.map(r => r.completedAt).filter(Boolean).sort().at(-1)
+                    avgScore,
+                    avgDurationSeconds,
+                    latestCompletion: completions.at(-1) || null,
                 };
             });
         },
 
         selectedQuestionsForPreview() {
-            if (!this.selectedReport) return [];
-            const ids = (this.selectedReport.questionIds || []).map(Number);
+            const set = new Set();
+            const answers = this.selectedStudentResult?.answers || {};
+
+            if (Array.isArray(answers)) {
+                answers.forEach(a => {
+                    const qid = Number(a.question_id ?? a.questionId ?? a.id ?? 0);
+                    if (qid > 0) set.add(qid);
+                });
+            } else {
+                Object.keys(answers).forEach(id => {
+                    const nid = Number(id);
+                    if (!isNaN(nid) && nid > 0) set.add(nid);
+                });
+            }
+
+            const reportIds = (this.selectedReport?.questionIds || []).map(Number);
+            reportIds.forEach(id => { if (!isNaN(id) && id > 0) set.add(id); });
+
+            const ids = Array.from(set);
             if (!ids.length) return [];
-            // Filter questions that match the IDs
-            return this.questions.filter(q => ids.includes(Number(q.id)));
+
+            return ids.map(id => {
+                const realQ = this.questions.find(q => Number(q.id) === id);
+                if (realQ) return realQ;
+
+                let ans = null;
+                if (Array.isArray(answers)) {
+                    ans = answers.find(a => Number(a.question_id ?? a.questionId ?? a.id) === id);
+                } else {
+                    ans = answers[id] || answers[String(id)];
+                }
+
+                if (ans && (ans.question_text || ans.text)) {
+                    return {
+                        id,
+                        text: ans.question_text || ans.text,
+                        type: 'Identification',
+                        virtual: true,
+                        answer: ans.answer_value || ans.answer || ''
+                    };
+                }
+                return null;
+            }).filter(Boolean);
         },
 
         tableOfSpecs() {
             const { cognitiveLevels } = this;
-            const loSet = new Set(
-                this.selectedQuestionsForPreview.map(q => this.normalizeLO(q.loTags)).filter(Boolean)
-            );
+            const reportQuestionIds = (this.selectedReport?.questionIds || []).map(Number);
+
+            let questions = [];
+            if (reportQuestionIds.length) {
+                questions = reportQuestionIds.map(id => this.questions.find(q => Number(q.id) === id)).filter(Boolean);
+            }
+            if (!questions.length) {
+                questions = this.selectedQuestionsForPreview.filter(q => !q.virtual);
+            }
+
+            const loSet = new Set(questions.map(q => this.normalizeLO(q.loTags)).filter(Boolean));
             const loTags = [...loSet].sort();
             const summary = Object.fromEntries(loTags.map(lo => [lo, Object.fromEntries(cognitiveLevels.map(l => [l, 0]))]));
             const rowTotals = Object.fromEntries(loTags.map(lo => [lo, 0]));
             const colTotals = Object.fromEntries(cognitiveLevels.map(l => [l, 0]));
 
-            this.selectedQuestionsForPreview.forEach(q => {
+            questions.forEach(q => {
                 const lo = this.normalizeLO(q.loTags);
                 const level = q.cognitiveLevel || q.cognitiveTag || '';
                 if (lo && summary[lo]?.[level] !== undefined) {
-                    summary[lo][level]++; rowTotals[lo]++; colTotals[level]++;
+                    summary[lo][level]++;
+                    rowTotals[lo]++;
+                    colTotals[level]++;
                 }
             });
             return { summary, rowTotals, colTotals, loTags, cognitiveLevels };
@@ -133,21 +255,70 @@ export default {
             const sorted = [...results].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 
             return this.selectedQuestionsForPreview.map(q => {
-                const correct = st => this.isCorrect(q, st);
-                const correctCount = results.filter(correct).length;
-                const difficulty = correctCount / n;
-                const discrimination = (sorted.slice(0, cutoff).filter(correct).length - sorted.slice(-cutoff).filter(correct).length) / cutoff;
-                const rec = difficulty < 0.2 ? { text: 'Revise (Too Hard)', class: 'bg-warning text-dark' }
-                    : difficulty > 0.9 ? { text: 'Revise (Too Easy)', class: 'bg-warning text-dark' }
+                const checkCorrect = st => {
+                    const answers = st.answers || {};
+                    const entry = answers[Number(q.id)] || answers[String(q.id)];
+                    if (entry && typeof entry === 'object' && 'is_correct' in entry) {
+                        const flag = entry.is_correct;
+                        if (flag === true || flag === 1 || flag === '1' || flag === 'true') return true;
+                        if (flag === false || flag === 0 || flag === '0' || flag === 'false') return false;
+                    }
+                    const score = parseInt(String(st.score || '').replace(/[^\d]/g, ''));
+                    if (score === 100) return true;
+                    return false;
+                };
+
+                const resultsWithData = results.filter(st => st.answers && Object.keys(st.answers).length > 0);
+                const totalWithData = resultsWithData.length || n;
+
+                const correctCount = results.filter(checkCorrect).length;
+                const difficulty = correctCount / totalWithData;
+
+                let discrimination = 0;
+                if (n >= cutoff * 2) {
+                    const upperGroup = sorted.slice(0, cutoff);
+                    const lowerGroup = sorted.slice(-cutoff);
+                    const upperCorrect = upperGroup.filter(checkCorrect).length;
+                    const lowerCorrect = lowerGroup.filter(checkCorrect).length;
+                    discrimination = (upperCorrect - lowerCorrect) / cutoff;
+                }
+
+                const rec =
+                    difficulty < 0.2  ? { text: 'Result (Too Hard)', class: 'bg-warning text-dark' }
+                    : difficulty > 0.9 ? { text: 'Result (Too Easy)', class: 'bg-success' }
                     : discrimination < 0.2 ? { text: 'Discard', class: 'bg-danger' }
                     : { text: 'Retain', class: 'bg-success' };
-                return { ...q, difficulty, discrimination, recommendation: rec, correctCount, total: n };
+
+                return {
+                    ...q,
+                    difficulty,
+                    discrimination,
+                    recommendation: rec,
+                    correctCount,
+                    total: totalWithData
+                };
             });
+        },
+
+        activeReport() {
+            if (this._cachedReport?.studentResults?.length) {
+                return {
+                    ...this._cachedReport,
+                    ...(this.selectedReport || {}),
+                    studentResults: this._cachedReport.studentResults
+                };
+            }
+            return this.selectedReport;
         }
     },
 
     methods: {
-        ...mapActions(useTestStore, ['setSelectedReport', 'setSelectedStudentResult', 'fetchCompletedResultsForAssignments', 'fetchReportsData', 'ensureTestReady', 'fetchStudentPerformanceReport']),
+        ...mapActions(useTestStore, [
+            'setSelectedReport', 'setSelectedStudentResult',
+            'fetchCompletedResultsForAssignments', 'fetchReportsData',
+            'ensureTestReady', 'fetchStudentPerformanceReport', 'ensureQuestionsLoadedByIds'
+        ]),
+        ...mapActions(useUserStore, ['fetchUsers']),
         ...mapActions(useUIStore, ['showToast']),
 
         setView(name) { this.$router.push({ name }); },
@@ -171,373 +342,380 @@ export default {
             return m ? m[0].toUpperCase().replace(/^CLO/, 'LO').replace(/\s+/, ' ') : raw || null;
         },
 
-        // ── Answer helpers ──────────────────────────────────────────────────────
-
-        resolveIsCorrect(v) {
-            if (v === null || v === undefined) return null;
-            if (typeof v === 'boolean') return v;
-            if (typeof v === 'number') return v === 1;
-            if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
-            return Boolean(v);
-        },
-
-        getAnswerEntry(question, sr) {
-            const answers = sr?.answers || {};
-            
-            // 1. Direct ID match (most common)
-            let entry = answers[Number(question.id)] ?? answers[String(question.id)];
-            if (entry) return entry;
-
-            // 2. Legacy array support
-            if (Array.isArray(answers)) {
-                entry = answers.find(a => Number(a.question_id) === Number(question.id));
-                if (entry) return { answer_value: entry.answer_value, is_correct: this.resolveIsCorrect(entry.is_correct) };
-            }
-
-            // 3. Super Robust Fuzzy matching (ID mismatch fallback)
-            // Strips whitespace and non-alphanumeric chars for a "loose" text comparison
-            const clean = str => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const targetText = clean(question.text);
-            
-            if (targetText) {
-                const values = Object.values(answers);
-                const textMatch = values.find(v => clean(v.question_text || v.text) === targetText);
-                if (textMatch) return textMatch;
-            }
-
-            return undefined;
-        },
-
-        getStudentAnswerValue(question, sr) {
-            const entry = this.getAnswerEntry(question, sr ?? this.selectedStudentResult);
-            if (entry == null) return '';
-            const val = String(typeof entry === 'object' ? (entry.answer_value ?? '') : entry).trim();
-            
-            // Normalize for True/False questions
-            if (question.type === 'True or False') {
-                const s = val.toLowerCase();
-                if (s === 'true' || s === '1' || s === 'yes' || s === 't') return 'True';
-                if (s === 'false' || s === '0' || s === 'no' || s === 'f') return 'False';
-            }
-            
-            // Multiple Choice: handle letter-to-text conversion
-            if (question.type === 'Multiple Choice' && /^[A-Z]$/i.test(val)) {
-                const idx = val.toUpperCase().charCodeAt(0) - 65;
-                if (question.options?.[idx]) return question.options[idx].text;
-            }
-            return val;
-        },
-
-        isCorrect(question, sr) {
-            const score = parseInt(String(sr?.score).replace(/[^\d]/g, ''));
-            
-            // 1. HIGH-TRUST SCORE FALLBACK: If the overall score is 100%, everything MUST be correct
-            if (score === 100) return true;
-
-            const entry = this.getAnswerEntry(question, sr);
-            if (entry == null) return false;
-
-            // 2. Trust DB flag if present
-            if (typeof entry === 'object' && 'is_correct' in entry) {
-                const flag = this.resolveIsCorrect(entry.is_correct);
-                if (flag !== null) return flag;
-            }
-
-            // 3. Fallback: manual value comparison
-            const given = this.getStudentAnswerValue(question, sr).toLowerCase();
-            const correct = (question.type === 'True or False') 
-                ? this.getCorrectTf(question).toLowerCase()
-                : (question.type === 'Multiple Choice')
-                    ? (() => {
-                        const ci = this.getMcCorrectIndex(question);
-                        return ci >= 0 ? String(question.options?.[ci]?.text || '').trim().toLowerCase() : null;
-                    })()
-                    : String(question.answer || question.correctAnswer || question.correct_answer || '').trim().toLowerCase();
-
-            if (!given || !correct) return false;
-            return given === correct;
-        },
-
-        // ── Multiple Choice helpers ─────────────────────────────────────────────
-
-        getMcCorrectIndex(question) {
-            // Check common property names for the correct index
-            for (const key of ['answerIndex', 'correctAnswerIndex', 'answer_index', 'correct_answer_index', 'correct_option_index']) {
-                const v = question[key];
-                if (v !== undefined && v !== null && v !== '' && !isNaN(Number(v))) return Number(v);
-            }
-            
-            // Check if correct answer is stored as text
-            const correctText = (question.answer ?? question.correctAnswer ?? question.correct_answer ?? '').toString().trim().toLowerCase();
-            if (correctText && question.options?.length) {
-                // If it's a letter A-Z
-                if (/^[A-Z]$/i.test(correctText)) {
-                    const idx = correctText.toUpperCase().charCodeAt(0) - 65;
-                    if (idx >= 0 && idx < question.options.length) return idx;
-                }
-                // Match by text
-                const idx = question.options.findIndex(o => (o.text || '').toString().trim().toLowerCase() === correctText);
-                if (idx >= 0) return idx;
-            }
-
-            // Check options array for is_correct flag
-            const mc = question.options || question.multiple_choice_answers || question.answers || [];
-            if (mc.length) {
-                const j = mc.findIndex(o => {
-                    const v = o.is_correct ?? o.correct ?? o.isCorrect ?? o.is_right ?? o.answer_is_correct;
-                    return this.resolveIsCorrect(v);
-                });
-                if (j >= 0) return j;
-            }
-            return -1;
-        },
-
-        isMcCorrect(question, idx, sr) {
-            const ci = this.getMcCorrectIndex(question);
-            return ci >= 0 && Number(idx) === ci;
-        },
-
-        isMcStudentAnswer(question, idx, sr) {
-            const entry = this.getAnswerEntry(question, sr);
-            const val = this.getStudentAnswerValue(question, sr);
-            
-            // If we found an actual answer value, use it
-            if (val) {
-                // Match by letter (A, B, C...)
-                if (/^[A-Z]$/i.test(val)) return (val.toUpperCase().charCodeAt(0) - 65) === idx;
-                // Match by text
-                const opt = question.options?.[idx];
-                if (opt && String(opt.text || '').trim().toLowerCase() === val.toLowerCase()) return true;
-                // Match by index (0, 1, 2...)
-                const asNum = parseInt(val, 10);
-                if (!isNaN(asNum) && String(asNum) === val) return asNum === idx;
-            }
-
-            // HIGH-TRUST FALLBACK: If score is 100%, assume correct option is the student's answer
-            const score = parseInt(String(sr?.score).replace(/[^\d]/g, ''));
-            if (score === 100) return this.isMcCorrect(question, idx, sr);
-
-            return false;
-        },
-
-        mcOptionClass(question, idx, sr) {
-            const c = this.isMcCorrect(question, idx, sr), s = this.isMcStudentAnswer(question, idx, sr);
-            if (c) return 'bg-success-subtle border-success text-success-emphasis fw-semibold shadow-sm';
-            if (s) return 'bg-danger-subtle border-danger text-danger-emphasis fw-semibold shadow-sm';
-            return 'bg-light text-muted opacity-75';
-        },
-
-        // ── True/False helpers ──────────────────────────────────────────────────
-
-        getCorrectTf(question) {
-            const raw = question.answer ?? question.correctAnswer ?? question.correct_answer ?? '';
-            if (typeof raw === 'boolean') return raw ? 'True' : 'False';
-            const s = String(raw).trim().toLowerCase();
-            if (s === 'true' || s === '1' || s === 'yes' || s === 't') return 'True';
-            if (s === 'false' || s === '0' || s === 'no' || s === 'f') return 'False';
-            return String(raw).trim() || 'True'; // Default to True if empty but exists
-        },
-
-        tfOptionClass(question, option, sr) {
-            const opt = String(option).trim();
-            const correct = this.getCorrectTf(question);
-            const student = this.getStudentAnswerValue(question, sr);
-            if (opt === correct) return 'bg-success-subtle border-success text-success-emphasis fw-semibold shadow-sm';
-            if (this.isTfStudentAnswer(question, opt, sr)) return 'bg-danger-subtle border-danger text-danger-emphasis fw-semibold shadow-sm';
-            return 'bg-light text-muted opacity-75';
-        },
-
-        isTfStudentAnswer(question, option, sr) {
-            const val = this.getStudentAnswerValue(question, sr);
-            if (val) return String(option).trim().toLowerCase() === val.toLowerCase();
-            
-            // HIGH-TRUST FALLBACK: If score is 100%, assume correct option is the student's answer
-            const score = parseInt(String(sr?.score).replace(/[^\d]/g, ''));
-            if (score === 100) return option === this.getCorrectTf(question);
-            
-            return false;
-        },
-
-        // ── Misc helpers ────────────────────────────────────────────────────────
-
-        getCorrectId: q => String(q.answer ?? q.correctAnswer ?? q.correct_answer ?? '').trim(),
-
-        getEnumAnswers: q => Array.isArray(q.answer) ? q.answer : Array.isArray(q.answers) ? q.answers : [],
-
         formatDuration(seconds) {
-            const s = Math.round(Number(seconds) || 0), m = Math.floor(s / 60);
-            return m ? `${m}m ${s % 60}s` : `${s % 60}s`;
+            const s = Math.round(Number(seconds) || 0);
+            if (s <= 0) return '—';
+            const m = Math.floor(s / 60);
+            const h = Math.floor(m / 60);
+            if (h > 0) return `${h}h ${m % 60}m`;
+            return m ? `${m}m ${s % 60}s` : `${s}s`;
+        },
+
+        _parseDuration(raw) {
+            if (raw == null || raw === '') return 0;
+            if (typeof raw === 'number') return Math.round(raw);
+            const s = String(raw).trim();
+            if (s.includes(':')) {
+                const p = s.split(':').map(Number);
+                if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+                if (p.length === 2) return p[0] * 60 + p[1];
+            }
+            return parseInt(s) || 0;
+        },
+
+        async _parseCheckResponse(result, testName, completedAt) {
+            const rawScore = Number(result.raw_score ?? result.score ?? 0);
+            const total    = Number(result.total ?? 0);
+
+            let percent = Number(result.score ?? 0);
+            if (total > 0 && percent <= total && percent === rawScore) {
+                percent = Math.round((rawScore / total) * 100);
+            } else {
+                percent = Math.round(percent);
+            }
+
+            const durationSeconds = this._parseDuration(result.time_spent);
+            const answersMap      = {};
+            const questionTimes   = {};
+            const list            = Array.isArray(result.answers) ? result.answers : [];
+
+            for (const a of list) {
+                const qid = Number(a.question_id ?? a.questionId ?? 0);
+                if (!qid) continue;
+                const entry = {
+                    answer_value:  a.answer_value ?? a.answer ?? '',
+                    is_correct:    a.is_correct === true  || a.is_correct === 1 ||
+                                   a.is_correct === '1'   || a.is_correct === 'true' ||
+                                   a.correct    === true  || a.correct    === 1,
+                    question_text: a.question_text || ''
+                };
+                answersMap[qid]         = entry;
+                answersMap[String(qid)] = entry;
+
+                // Capture server-side time_spent per answer if the backend stores it
+                if (a.time_spent !== undefined && a.time_spent !== null) {
+                    questionTimes[qid] = Number(a.time_spent);
+                }
+            }
+
+            // Fill in question_text from store for any missing entries
+            for (const [key, entry] of Object.entries(answersMap)) {
+                if (!entry.question_text && !isNaN(Number(key))) {
+                    const q = this.questions.find(x => Number(x.id) === Number(key));
+                    if (q) entry.question_text = q.text;
+                }
+            }
+
+            return {
+                name: testName,
+                creatorName: result.created_by || 'N/A',
+                durationSeconds,
+                completedAt: result.completed_at || completedAt || null,
+                score: percent,
+                rawScore,
+                totalQuestions: total,
+                answers: answersMap,
+                questionTimes,
+                offlineOnly: false
+            };
+        },
+
+        /**
+         * Merge per-question times from testStore.studentTests into the parsed
+         * questionTimes map. The store entry was written by TakeTest.vue using
+         * start/end timestamps, so it reflects real time-on-question including
+         * all revisits. Server values take precedence only when non-zero.
+         */
+        _mergeLocalQuestionTimes(questionTimes, assignmentId, testId, studentId) {
+            const testStore = useTestStore();
+
+            const st = testStore.studentTests.find(s =>
+                (assignmentId && Number(s.assignmentId) === Number(assignmentId)) ||
+                (Number(s.testId) === Number(testId) && Number(s.studentId) === Number(studentId))
+            );
+
+            if (!st?.questionTimes) return questionTimes;
+
+            const merged = { ...questionTimes };
+            for (const [qid, localSecs] of Object.entries(st.questionTimes)) {
+                const key = Number(qid);
+                // Use local value when server didn't return one or returned 0
+                if (!merged[key] || merged[key] === 0) {
+                    merged[key] = localSecs;
+                }
+            }
+            return merged;
         },
 
         getStudentName(id, st = null) {
-            const u = (this.users || []).find(u => Number(u.id) === Number(id));
-            if (u) return `${u.fname || ''} ${u.lname || ''}`.trim();
-            if (st?.username) return st.username;
-            if (this.selectedStudentResult?.username && (!id || id === this.selectedStudentResult.studentId)) 
-                return this.selectedStudentResult.username;
-            return id ? `Student #${id}` : 'Unknown Student';
+            const uid = Number(
+                id ||
+                st?.studentId || st?.student_id ||
+                st?.user_id   || 0
+            );
+
+            const u = (this.users || []).find(u => Number(u.id) === uid);
+            if (u) {
+                const fullName = u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim();
+                if (fullName) return fullName;
+            }
+
+            if (st?.student?.fullname) return st.student.fullname;
+            if (st?.fullname)          return st.fullname;
+            if (st?.student?.fname)    return `${st.student.fname} ${st.student.lname || ''}`.trim();
+            if (st?.fname)             return `${st.fname} ${st.lname || ''}`.trim();
+            if (st?.creatorName && st.creatorName !== 'N/A') return st.creatorName;
+            if (st?.name)              return st.name;
+            if (st?.username)          return st.username;
+            if (this.selectedStudentResult?.username) return this.selectedStudentResult.username;
+
+            return uid ? `Student #${uid}` : 'Unknown Student';
         },
 
         getScoreBadgeClass(score) {
-            const val = parseInt(String(score).replace(/[^\d]/g, '')) || 0;
+            const val = parseInt(String(score ?? '').replace(/[^\d]/g, '')) || 0;
             return val >= 80 ? 'bg-success' : val >= 60 ? 'bg-warning text-dark' : 'bg-danger';
         },
-
-        // ── Actions ─────────────────────────────────────────────────────────────
 
         async viewReport(test) {
             this.loading = true;
             try {
-                // Ensure exam questions are loaded first and get the enriched test object
-                const fullTest = await this.ensureTestReady(test.id);
+                const fullTest = await this.ensureTestReady(test.id || test.testId);
 
-                // Use the robust source that includes data from the performance report
-                const results = this.completedStudentTests.filter(
-                    st => Number(st.testId) === Number(test.id) || 
-                          (st.exam_name && (st.exam_name === test.name))
-                );
-
-                const n = results.length;
-                const avg = key => {
-                    const valid = results.map(r => Number(r[key])).filter(x => !isNaN(x));
-                    return valid.length ? valid.reduce((s, r) => s + r, 0) / valid.length : 0;
-                };
-
-                this.setSelectedReport({
-                    ...(fullTest || test),
-                    participants: n,
-                    avgScore: Number(avg('score').toFixed(1)),
-                    avgDurationSeconds: avg('durationSeconds'),
-                    studentResults: results
+                const results = this.completedStudentTests.filter(st => {
+                    const byId   = test.id && Number(st.testId) === Number(test.id);
+                    const byName = test.name && st.exam_name &&
+                        String(st.exam_name).toLowerCase() === String(test.name).toLowerCase();
+                    return byId || byName;
                 });
 
+                const n = results.length;
+                const validScores = results.map(r => r.score).filter(s => s != null && !isNaN(s));
+                const avgScore = validScores.length
+                    ? Number((validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1))
+                    : null;
+                const validDurations = results.map(r => r.durationSeconds).filter(d => d > 0);
+                const avgDurationSeconds = validDurations.length
+                    ? validDurations.reduce((a, b) => a + b, 0) / validDurations.length
+                    : 0;
+
+                const report = {
+                    ...(fullTest || test),
+                    participants: n,
+                    avgScore,
+                    avgDurationSeconds,
+                    studentResults: results
+                };
+
+                const needsAnswers = results.filter(r => !r.answers || !Object.keys(r.answers).length);
+                if (needsAnswers.length > 0) {
+                    Promise.allSettled(needsAnswers.map(async (r) => {
+                        if (r.assignmentId) {
+                            try {
+                                const res = await api.get(`/student-answers/check/${r.assignmentId}`);
+                                const d = res?.data || {};
+                                if (d.completed || d.status === 'completed') {
+                                    const testName = report.name || r.name || r.exam_name || `Exam ${report.id}`;
+                                    const parsed = await this._parseCheckResponse(d, testName, r.completedAt);
+                                    r.answers        = parsed.answers;
+                                    r.questionTimes  = this._mergeLocalQuestionTimes(
+                                        parsed.questionTimes,
+                                        r.assignmentId,
+                                        r.testId,
+                                        r.studentId
+                                    );
+                                    r.rawScore       = parsed.rawScore;
+                                    r.totalQuestions = parsed.totalQuestions;
+                                    const stIdx = this.studentTests.findIndex(
+                                        st => Number(st.assignmentId) === Number(r.assignmentId)
+                                    );
+                                    if (stIdx !== -1) {
+                                        this.studentTests[stIdx].answers        = parsed.answers;
+                                        this.studentTests[stIdx].questionTimes  = r.questionTimes;
+                                        this.studentTests[stIdx].rawScore       = parsed.rawScore;
+                                        this.studentTests[stIdx].totalQuestions = parsed.totalQuestions;
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn(`Failed to fetch answers for assignment ${r.assignmentId}:`, e);
+                            }
+                        }
+                    })).then(() => {
+                        console.log('[Reports] Background answer fetch complete.');
+                        if (this.selectedReport?.id === report.id) {
+                            this.setSelectedReport({ ...report });
+                        }
+                    });
+                }
+
+                this._cachedReport = report;
+                this.setSelectedReport(report);
                 this.$router.push({ name: 'reportDetail' });
             } finally {
                 this.loading = false;
             }
         },
 
-        async openStudentResult(result) {
-            let enriched = { ...result };
-            if (enriched.assignmentId) {
-                try {
-                    const res = await api.get(`/student-answers/check/${enriched.assignmentId}`);
-                    const d = res?.data || {};
-                    if (d.time_spent > 0) enriched.durationSeconds = Number(d.time_spent);
-                    if (!enriched.durationSeconds && enriched.startedAt && enriched.completedAt) {
-                        enriched.durationSeconds = Math.round((new Date(enriched.completedAt) - new Date(enriched.startedAt)) / 1000);
-                    }
-                    
-                    // ── Super Robust Answer Extraction ──────────────────────────
-                    // Try all possible backend paths for answer lists
-                    const list = Array.isArray(d.answers) ? d.answers
-                        : Array.isArray(d.data?.answers) ? d.data.answers
-                        : Array.isArray(d.data) ? d.data
-                        : Array.isArray(d.exam_questions) ? d.exam_questions
-                        : (d.exam?.exam_questions && Array.isArray(d.exam.exam_questions) ? d.exam.exam_questions : []);
+        handleBack(targetView) {
+            if (targetView === 'reportDetail' && this._cachedReport) {
+                this.setSelectedReport({ ...this._cachedReport });
+            }
+            this.$router.push({ name: targetView });
+        },
 
-                    if (list.length) {
-                        const map = {};
-                        list.forEach(a => {
-                            // 1. Extract Question ID from various possible nested fields
-                            const qid = a.question_id ?? a.questionId ?? a.question?.id ?? a.id;
-                            if (qid == null) return;
-                            
-                            // 2. Extract Answer Value
-                            // In some cases, the answer is inside a nested object or a differently named field
-                            const val = a.answer_value ?? a.answer ?? a.student_answer ?? a.studentAnswer ?? '';
-                            
-                            // 3. Extract Correctness Flag
-                            const correct = a.is_correct ?? a.correct ?? a.isCorrect ?? a.is_right ?? a.isRight;
-                            
-                            const entry = {
-                                answer_value: val,
-                                is_correct: this.resolveIsCorrect(correct),
-                                // 4. Store text to facilitate fuzzy matching later if IDs mismatch
-                                question_text: a.question?.text ?? a.question_text ?? a.text ?? ''
+        async openStudentResult(result) {
+            if (!result) {
+                this.showToast('Error', 'No result data provided.', 'error');
+                return;
+            }
+
+            this.loading = true;
+            try {
+                this.setSelectedStudentResult(result);
+
+                const targetTestId = Number(result.testId || result.test_id || 0);
+                let questionIds = [];
+
+                if (targetTestId) {
+                    try {
+                        await this.ensureTestReady(targetTestId);
+                        const test = this.pilotTests.find(t => Number(t.id) === targetTestId);
+                        if (test?.questionIds?.length) {
+                            questionIds = [...test.questionIds];
+                            await this.ensureQuestionsLoadedByIds(questionIds);
+
+                            const merged = {
+                                ...(this._cachedReport || this.selectedReport || {}),
+                                ...test,
+                                studentResults: this._cachedReport?.studentResults || this.selectedReport?.studentResults || []
+                            };
+                            this.setSelectedReport(merged);
+                        }
+                    } catch (e) {
+                        console.warn('[Reports] Failed to load full test/question data:', e);
+                    }
+                }
+
+                if (result.assignmentId) {
+                    try {
+                        const res = await api.get(`/student-answers/check/${result.assignmentId}`);
+                        const d = res?.data || {};
+
+                        if (d.completed || d.status === 'completed') {
+                            const testName = this.activeReport?.name || result.name || result.exam_name || `Exam ${targetTestId}`;
+                            const parsed = await this._parseCheckResponse(d, testName, result.completedAt);
+
+                            const resolvedIds = questionIds.length
+                                ? questionIds
+                                : Object.keys(parsed.answers).map(Number).filter(n => n > 0);
+
+                            resolvedIds.forEach(qid => {
+                                const qidNum = Number(qid);
+                                if (qidNum && !parsed.answers[qidNum]) {
+                                    const q     = this.questions.find(x => Number(x.id) === qidNum);
+                                    const blank = { answer_value: '', is_correct: false, question_text: q?.text || '' };
+                                    parsed.answers[qidNum]         = blank;
+                                    parsed.answers[String(qidNum)] = blank;
+                                }
+                            });
+
+                            // Merge locally-tracked question times (start/end timestamp approach)
+                            // into the server response — this is the source of truth for the
+                            // "Time Spent" badge shown per question in StudentResultReview
+                            const mergedQuestionTimes = this._mergeLocalQuestionTimes(
+                                parsed.questionTimes,
+                                result.assignmentId,
+                                targetTestId,
+                                Number(result.studentId || result.student_id || result.user_id || 0)
+                            );
+
+                            const payload = {
+                                studentId:       Number(result.studentId || result.student_id || result.user_id || 0),
+                                student_id:      Number(result.student_id || result.studentId || result.user_id || 0),
+                                username:        result.username || result.name,
+                                testId:          targetTestId,
+                                assignmentId:    result.assignmentId,
+                                name:            parsed.name,
+                                score:           parsed.score,
+                                rawScore:        parsed.rawScore,
+                                totalQuestions:  parsed.totalQuestions || resolvedIds.length,
+                                durationSeconds: parsed.durationSeconds,
+                                completedAt:     parsed.completedAt,
+                                answers:         parsed.answers,
+                                // questionTimes is what StudentResultReview.getQuestionTime() reads
+                                questionTimes:   mergedQuestionTimes,
                             };
 
-                            // Store under both key types
-                            map[Number(qid)] = entry;
-                            map[String(qid)] = entry;
-                        });
-                        enriched.answers = map;
-                    }
-                } catch (err) {
-                    console.warn('Failed to fetch detailed student answers:', err);
-                }
-            }
-
-            // Ensure the exam questions are loaded before viewing
-            if (this.selectedReport?.id !== enriched.testId) {
-                const test = this.pilotTests.find(t => Number(t.id) === Number(enriched.testId));
-                if (test) {
-                    this.setSelectedReport({
-                        ...test,
-                        participants: 1,
-                        studentResults: [enriched]
-                    });
-                } else if (enriched.testId) {
-                    await this.ensureTestReady(enriched.testId);
-                    const fresh = this.pilotTests.find(t => Number(t.id) === Number(enriched.testId));
-                    if (fresh) {
-                        this.setSelectedReport({
-                            ...fresh,
-                            participants: 1,
-                            studentResults: [enriched]
-                        });
+                            this.setSelectedStudentResult(payload);
+                        }
+                    } catch (err) {
+                        console.warn('[Reports] Failed to fetch detailed student answers:', err);
                     }
                 }
-            }
 
-            this.setSelectedStudentResult(enriched);
-            this.returnView = 'reportDetail';
-            this.$router.push({ name: 'studentResultDetail' });
+                this.$router.push({ name: 'studentResultDetail' });
+            } catch (error) {
+                console.error('[Reports] Failed to open student result:', error);
+                this.showToast('Error', 'Failed to load student results. Please try again.', 'error');
+            } finally {
+                this.loading = false;
+            }
         },
 
         async viewPerformanceDetail(st) {
             this.loading = true;
             try {
-                // Try to find a matching result in the existing studentTests that has more metadata
-                let found = this.studentTests.find(item => {
-                    const nameMatch = this.getStudentName(item.studentId).toLowerCase() === st.username.toLowerCase();
-                    const examMatch = (item.name || '').toLowerCase() === st.exam_name.toLowerCase();
-                    return nameMatch && examMatch;
-                });
+                let assignmentId = Number(st.assignment_id || st.assignmentId || st.id || 0);
+                let testId       = Number(st.exam_id || st.testId || st.test_id || 0);
+                const studentId  = Number(st.student_id || st.studentId || st.user_id || 0);
 
-                // If not found in studentTests, but we have assignment IDs in the payload, use them
-                let assignmentId = st.assignment_id || st.assignmentId || st.id;
-                let testId = st.exam_id || st.testId || st.test_id;
-                const studentId = st.student_id || st.studentId || st.user_id;
-
-                // Fallback: try to find testId by name if missing
                 if (!testId && st.exam_name) {
-                    const test = this.pilotTests.find(t => (t.name || '').toLowerCase() === st.exam_name.toLowerCase());
+                    const test = this.pilotTests.find(
+                        t => (t.name || '').toLowerCase() === String(st.exam_name).toLowerCase()
+                    );
                     if (test) testId = test.id;
                 }
 
-                if (!found && assignmentId) {
+                if (!assignmentId) {
+                    this.showToast('Info', 'Detailed analysis for this student is not available.', 'info');
+                    return;
+                }
+
+                let found = this.studentTests.find(item => Number(item.assignmentId) === assignmentId);
+
+                if (!found) {
                     const parts = String(st.raw_score || '').split('/');
                     found = {
                         assignmentId,
                         testId,
                         studentId,
+                        student_id: studentId,
                         username: st.username,
                         name: st.exam_name,
-                        status: st.status,
-                        score: parseInt(String(st.score).replace(/[^\d]/g, '')) || 0,
-                        rawScore: parseInt(parts[0]) || st.student_answers || 0,
-                        totalQuestions: parseInt(parts[1]) || st.exam_questions || 0,
-                        durationSeconds: parseInt(st.time_spent) || 0,
-                        completedAt: st.completed_at
+                        status: 'Completed',
+                        score: (() => {
+                            const raw = String(st.score ?? '').trim();
+                            if (raw.includes('%')) return parseInt(raw);
+                            if (!isNaN(Number(raw)) && Number(raw) <= 100) return Math.round(Number(raw));
+                            return null;
+                        })(),
+                        rawScore: parseInt(parts[0]) || Number(st.student_answers) || null,
+                        totalQuestions: parseInt(parts[1]) || Number(st.exam_questions) || null,
+                        durationSeconds: (() => {
+                            const ts = st.time_spent;
+                            if (!ts) return 0;
+                            if (typeof ts === 'number') return ts;
+                            if (String(ts).includes(':')) {
+                                const p = String(ts).split(':').map(Number);
+                                return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+                            }
+                            return parseInt(ts) || 0;
+                        })(),
+                        completedAt: st.completed_at || null
                     };
                 }
 
-                if (found && found.assignmentId) {
-                    await this.openStudentResult(found);
-                } else {
-                    this.showToast({ message: 'Detailed analysis for this student is not available.', type: 'info' });
-                }
+                await this.openStudentResult(found);
             } finally {
                 this.loading = false;
             }
@@ -545,7 +723,15 @@ export default {
     },
 
     async mounted() {
+        this.fetchUsers().catch(() => {});
         if (this.$route?.query?.back) this.returnView = String(this.$route.query.back);
+
+        if (this.currentView === 'reportDetail' && this.selectedReport) {
+            if (!this._cachedReport && this.selectedReport.studentResults?.length) {
+                this._cachedReport = { ...this.selectedReport };
+            }
+        }
+
         this.loading = true;
         try {
             await Promise.allSettled([
@@ -555,12 +741,18 @@ export default {
         } catch (e) {
             console.error('Initial data fetch failed:', e);
             try { await this.fetchCompletedResultsForAssignments(); } catch (_) {}
+        } finally {
+            this.loading = false;
         }
-        this.loading = false;
     },
 
     watch: {
-        $route(to) { if (to?.query?.back) this.returnView = String(to.query.back); }
+        $route(to) {
+            if (to?.query?.back) this.returnView = String(to.query.back);
+            if (to?.name === 'reportDetail' && this._cachedReport) {
+                this.setSelectedReport({ ...this._cachedReport });
+            }
+        }
     }
 };
 </script>
@@ -582,7 +774,8 @@ export default {
             <div class="card-header bg-white p-0">
                 <ul class="nav nav-tabs card-header-tabs m-0 border-0">
                     <li class="nav-item">
-                        <a class="nav-link active py-3 px-4 border-0 border-bottom border-3 border-primary rounded-0 fw-bold" href="#" @click.prevent="reportsViewTab = 'tests'">
+                        <a class="nav-link active py-3 px-4 border-0 border-bottom border-3 border-primary rounded-0 fw-bold"
+                            href="#" @click.prevent>
                             <i class="fas fa-file-alt me-2"></i> Completed Pilot Tests
                         </a>
                     </li>
@@ -592,7 +785,7 @@ export default {
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
-                            <tr class="text-uppercase small tracking-wider">
+                            <tr class="text-uppercase small">
                                 <th class="p-3">Test Name</th>
                                 <th class="text-center">Participants</th>
                                 <th class="text-center">Avg Score</th>
@@ -610,25 +803,33 @@ export default {
                             </tr>
                             <tr v-else-if="!completedTests.length">
                                 <td colspan="6" class="text-center text-muted p-5">
-                                    <i class="fas fa-folder-open fa-3x mb-3 opacity-25"></i>
-                                    <p class="mb-0">No tests have been completed yet.</p>
+                                    <i class="fas fa-folder-open fa-3x mb-3 opacity-25 d-block"></i>
+                                    No completed tests found yet.
                                 </td>
                             </tr>
                             <tr v-else v-for="test in completedTests" :key="test.id">
                                 <td class="p-3">
-                                    <div class="fw-bold text-dark">{{ test.name || `Exam ${test.id}` }}</div>
+                                    <div class="fw-bold text-dark">{{ test.name }}</div>
                                     <div class="small text-muted" v-if="test.description">{{ test.description }}</div>
                                 </td>
                                 <td class="text-center">
                                     <span class="badge bg-light text-dark border px-3 rounded-pill">{{ test.participants }}</span>
                                 </td>
                                 <td class="text-center">
-                                    <span class="badge fs-6 px-3 rounded-pill" :class="getScoreBadgeClass(test.avgScore)">{{ test.avgScore }}%</span>
+                                    <span v-if="test.avgScore != null" class="badge fs-6 px-3 rounded-pill" :class="getScoreBadgeClass(test.avgScore)">
+                                        {{ test.avgScore }}%
+                                    </span>
+                                    <span v-else class="text-muted">—</span>
                                 </td>
                                 <td class="text-center text-muted fw-medium">{{ formatDuration(test.avgDurationSeconds) }}</td>
-                                <td class="text-center text-muted small">{{ test.latestCompletion ? new Date(test.latestCompletion).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—' }}</td>
+                                <td class="text-center text-muted small">
+                                    {{ test.latestCompletion
+                                        ? new Date(test.latestCompletion).toLocaleDateString(undefined, { dateStyle: 'medium' })
+                                        : '—' }}
+                                </td>
                                 <td class="text-center">
-                                    <button class="btn btn-primary btn-sm rounded-pill px-4 shadow-sm" @click="viewReport(test)" :disabled="loading">
+                                    <button class="btn btn-primary btn-sm rounded-pill px-4 shadow-sm"
+                                        @click="viewReport(test)" :disabled="loading">
                                         <i class="fas fa-chart-bar me-1"></i> View Report
                                     </button>
                                 </td>
@@ -647,18 +848,17 @@ export default {
                 <i class="fas fa-arrow-left me-1"></i> Back
             </button>
             <div>
-                <h2 class="mb-0 fw-bold">{{ selectedReport?.name || 'Report' }}</h2>
-                <small class="text-muted">{{ selectedReport?.description || 'Comprehensive exam analysis and results' }}</small>
+                <h2 class="mb-0 fw-bold">{{ activeReport?.name || 'Report' }}</h2>
+                <small class="text-muted">{{ activeReport?.description || 'Comprehensive exam analysis and results' }}</small>
             </div>
         </div>
 
-        <!-- Summary Cards -->
         <div class="row g-4 mb-5">
             <div class="col-sm-6 col-lg-3" v-for="card in [
-                { label: 'Participants', value: selectedReport?.participants || 0, icon: 'users', cls: 'bg-primary' },
-                { label: 'Average Score', value: (selectedReport?.avgScore?.toFixed(1) || 0) + '%', icon: 'chart-line', cls: getScoreBadgeClass(selectedReport?.avgScore) },
-                { label: 'Average Time', value: formatDuration(selectedReport?.avgDurationSeconds), icon: 'clock', cls: 'bg-info' },
-                { label: 'Total Questions', value: selectedQuestionsForPreview.length, icon: 'list-ol', cls: 'bg-secondary' }
+                { label: 'Participants',    value: activeReport?.participants ?? 0,             icon: 'users',   cls: 'bg-primary' },
+                { label: 'Average Score',   value: activeReport?.avgScore != null ? activeReport.avgScore + '%' : '—', icon: 'chart-line', cls: getScoreBadgeClass(activeReport?.avgScore) },
+                { label: 'Average Time',    value: formatDuration(activeReport?.avgDurationSeconds), icon: 'clock',   cls: 'bg-info' },
+                { label: 'Total Questions', value: selectedQuestionsForPreview.length,             icon: 'list-ol', cls: 'bg-secondary' }
             ]" :key="card.label">
                 <div class="card border-0 shadow-sm overflow-hidden h-100">
                     <div class="card-body d-flex align-items-center p-4">
@@ -667,7 +867,7 @@ export default {
                         </div>
                         <div>
                             <div class="fs-3 fw-bold mb-0 lh-1">{{ card.value }}</div>
-                            <div class="text-muted small fw-semibold text-uppercase tracking-wider">{{ card.label }}</div>
+                            <div class="text-muted small fw-semibold text-uppercase">{{ card.label }}</div>
                         </div>
                     </div>
                 </div>
@@ -677,28 +877,36 @@ export default {
         <div class="card shadow-sm border-0 rounded-4 overflow-hidden">
             <div class="card-header bg-white p-0">
                 <ul class="nav nav-tabs card-header-tabs m-0 border-0">
-                    <li class="nav-item flex-fill text-center" v-for="tab in [{ key:'overall', icon:'chart-bar', label:'Overall Analysis' }, { key:'student', icon:'users', label:'Student Performance' }]" :key="tab.key">
-                        <a class="nav-link py-3 border-0 border-bottom border-3 rounded-0 cursor-pointer fw-semibold" :class="reportTab === tab.key ? 'active text-primary border-primary bg-light' : 'text-muted'" @click="reportTab = tab.key">
-                            <i :class="`fas fa-${tab.icon} me-2`"></i> {{ tab.label }}
+                    <li class="nav-item flex-fill text-center"
+                        v-for="tab in [
+                            { key: 'overall', icon: 'chart-bar', label: 'Overall Analysis' },
+                            { key: 'student', icon: 'users',     label: 'Student Performance' }
+                        ]" :key="tab.key">
+                        <a class="nav-link py-3 border-0 border-bottom border-3 rounded-0 cursor-pointer fw-semibold"
+                            :class="reportTab === tab.key
+                                ? 'active text-primary border-primary bg-light'
+                                : 'text-muted border-transparent'"
+                            @click="reportTab = tab.key">
+                            <i :class="`fas fa-${tab.icon} me-2`"></i>{{ tab.label }}
                         </a>
                     </li>
                 </ul>
             </div>
-            <div class="card-body p-4">
 
+            <div class="card-body p-4">
                 <!-- Overall Analysis -->
                 <div v-if="reportTab === 'overall'">
                     <div class="d-flex align-items-center mb-4">
-                        <div class="bg-primary bg-opacity-10 p-2 rounded-2 me-3">
-                            <i class="fas fa-th-list text-primary"></i>
-                        </div>
+                        <div class="bg-primary bg-opacity-10 p-2 rounded-2 me-3"><i class="fas fa-th-list text-primary"></i></div>
                         <h5 class="fw-bold mb-0">Table of Specifications (LO × Cognitive Level)</h5>
                     </div>
-                    <div v-if="!tableOfSpecs.loTags.length" class="text-muted small mb-4 p-5 text-center border rounded-3 bg-light">No LO/cognitive level data available for this exam.</div>
+                    <div v-if="!tableOfSpecs.loTags.length" class="text-muted small mb-4 p-5 text-center border rounded-3 bg-light">
+                        No LO/cognitive level data available for this exam.
+                    </div>
                     <div v-else class="table-responsive mb-5">
                         <table class="table table-bordered align-middle text-center mb-0">
                             <thead class="table-light">
-                                <tr class="text-uppercase small tracking-wider">
+                                <tr class="text-uppercase small">
                                     <th class="text-start p-3">Learning Outcome</th>
                                     <th v-for="l in tableOfSpecs.cognitiveLevels" :key="l">{{ l }}</th>
                                     <th class="bg-primary bg-opacity-10">Total</th>
@@ -708,7 +916,9 @@ export default {
                                 <tr v-for="lo in tableOfSpecs.loTags" :key="lo">
                                     <td class="text-start fw-semibold p-3">{{ lo }}</td>
                                     <td v-for="l in tableOfSpecs.cognitiveLevels" :key="l">
-                                        <span v-if="tableOfSpecs.summary[lo][l]" class="badge rounded-pill bg-primary bg-opacity-10 text-primary px-3">{{ tableOfSpecs.summary[lo][l] }}</span>
+                                        <span v-if="tableOfSpecs.summary[lo][l]" class="badge rounded-pill bg-primary bg-opacity-10 text-primary px-3">
+                                            {{ tableOfSpecs.summary[lo][l] }}
+                                        </span>
                                         <span v-else class="text-muted opacity-25">—</span>
                                     </td>
                                     <td class="fw-bold bg-light">{{ tableOfSpecs.rowTotals[lo] || 0 }}</td>
@@ -725,16 +935,16 @@ export default {
                     </div>
 
                     <div class="d-flex align-items-center mb-4">
-                        <div class="bg-success bg-opacity-10 p-2 rounded-2 me-3">
-                            <i class="fas fa-microscope text-success"></i>
-                        </div>
+                        <div class="bg-success bg-opacity-10 p-2 rounded-2 me-3"><i class="fas fa-microscope text-success"></i></div>
                         <h5 class="fw-bold mb-0">Item Analysis</h5>
                     </div>
-                    <div v-if="!itemAnalysis.length" class="text-muted small p-5 text-center border rounded-3 bg-light">Not enough data for detailed item analysis.</div>
+                    <div v-if="!itemAnalysis.length" class="text-muted small p-5 text-center border rounded-3 bg-light">
+                        Not enough data for detailed item analysis.
+                    </div>
                     <div v-else class="table-responsive">
                         <table class="table table-hover align-middle">
                             <thead class="table-light">
-                                <tr class="text-uppercase small tracking-wider">
+                                <tr class="text-uppercase small">
                                     <th class="p-3">#</th>
                                     <th>Question</th>
                                     <th class="text-center">Correct Rate</th>
@@ -747,7 +957,7 @@ export default {
                                 <tr v-for="(item, i) in itemAnalysis" :key="item.id">
                                     <td class="text-muted p-3 fw-bold">{{ i + 1 }}</td>
                                     <td>
-                                        <div class="fw-semibold mb-1" style="max-width:400px; white-space: normal;">{{ item.text }}</div>
+                                        <div class="fw-semibold mb-1" style="max-width:400px;white-space:normal">{{ item.text }}</div>
                                         <div class="d-flex gap-2">
                                             <span class="badge bg-light text-dark border">{{ item.type }}</span>
                                             <span class="badge bg-light text-dark border">{{ item.cognitiveLevel }}</span>
@@ -755,22 +965,26 @@ export default {
                                     </td>
                                     <td class="text-center">
                                         <div class="fw-bold text-primary">{{ item.correctCount }} / {{ item.total }}</div>
-                                        <div class="progress mt-1" style="height: 4px;">
+                                        <div class="progress mt-1" style="height:4px">
                                             <div class="progress-bar bg-primary" :style="{ width: (item.difficulty * 100) + '%' }"></div>
                                         </div>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge rounded-pill px-3" :class="item.difficulty < 0.2 ? 'bg-danger' : item.difficulty > 0.9 ? 'bg-warning text-dark' : 'bg-success'">
+                                        <span class="badge rounded-pill px-3"
+                                            :class="item.difficulty < 0.2 ? 'bg-danger' : item.difficulty > 0.9 ? 'bg-warning text-dark' : 'bg-success'">
                                             {{ (item.difficulty * 100).toFixed(0) }}%
                                         </span>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge rounded-pill px-3" :class="item.discrimination < 0.2 ? 'bg-danger' : item.discrimination >= 0.4 ? 'bg-success' : 'bg-warning text-dark'">
+                                        <span class="badge rounded-pill px-3"
+                                            :class="item.discrimination < 0.2 ? 'bg-danger' : 'bg-info'">
                                             {{ item.discrimination.toFixed(2) }}
                                         </span>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge rounded-pill px-3 py-2" :class="item.recommendation.class">{{ item.recommendation.text }}</span>
+                                        <span class="badge rounded-pill px-3 py-2" :class="item.recommendation.class">
+                                            {{ item.recommendation.text }}
+                                        </span>
                                     </td>
                                 </tr>
                             </tbody>
@@ -783,7 +997,7 @@ export default {
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
                             <thead class="table-light">
-                                <tr class="text-uppercase small tracking-wider">
+                                <tr class="text-uppercase small">
                                     <th class="p-3">Student</th>
                                     <th class="text-center">Score</th>
                                     <th class="text-center">Raw Score</th>
@@ -793,29 +1007,43 @@ export default {
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-if="!selectedReport?.studentResults?.length">
-                                    <td colspan="6" class="text-center text-muted p-5">No student results found for this exam.</td>
+                                <tr v-if="!activeReport?.studentResults?.length">
+                                    <td colspan="6" class="text-center text-muted p-5">
+                                        No student results found for this exam.
+                                    </td>
                                 </tr>
-                                <tr v-else v-for="st in selectedReport.studentResults" :key="st.studentId || st.username">
+                                <tr v-else v-for="st in activeReport.studentResults" :key="st.username">
                                     <td class="p-3">
                                         <div class="d-flex align-items-center">
                                             <div class="bg-light rounded-circle p-2 me-3">
                                                 <i class="fas fa-user text-muted"></i>
                                             </div>
-                                            <div class="fw-bold text-dark">{{ getStudentName(st.studentId, st) }}</div>
+                                            <div class="fw-bold text-dark">
+                                                {{ getStudentName(st.studentId || st.student_id || st.user_id, st) }}
+                                            </div>
                                         </div>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge fs-6 px-3 rounded-pill" :class="getScoreBadgeClass(st.score)">{{ st.score ?? '—' }}%</span>
+                                        <span v-if="st.score != null" class="badge fs-6 px-3 rounded-pill" :class="getScoreBadgeClass(st.score)">
+                                            {{ st.score }}%
+                                        </span>
+                                        <span v-else class="text-muted">—</span>
                                     </td>
                                     <td class="text-center">
-                                        <div class="fw-semibold text-dark">{{ st.rawScore ?? '?' }} / {{ st.totalQuestions ?? '?' }}</div>
+                                        <div class="fw-semibold">
+                                            {{ st.rawScore ?? st.raw_score ?? '?' }} / {{ st.totalQuestions ?? st.total_questions ?? '?' }}
+                                        </div>
                                         <div class="small text-muted">Correct</div>
                                     </td>
-                                    <td class="text-center text-muted fw-medium">{{ st.durationSeconds ? formatDuration(st.durationSeconds) : '—' }}</td>
-                                    <td class="text-center text-muted small">{{ st.completedAt ? new Date(st.completedAt).toLocaleString() : '—' }}</td>
+                                    <td class="text-center text-muted fw-medium">
+                                        {{ (st.durationSeconds > 0 || st.time_spent) ? formatDuration(st.durationSeconds || st.time_spent) : '—' }}
+                                    </td>
+                                    <td class="text-center text-muted small">
+                                        {{ st.completedAt ? new Date(st.completedAt).toLocaleString() : '—' }}
+                                    </td>
                                     <td class="text-center">
-                                        <button class="btn btn-primary btn-sm rounded-pill px-4 shadow-sm" @click="openStudentResult(st)">
+                                        <button class="btn btn-primary btn-sm rounded-pill px-4 shadow-sm"
+                                            @click="openStudentResult(st)">
                                             <i class="fas fa-file-alt me-1"></i> Review
                                         </button>
                                     </td>
@@ -828,128 +1056,26 @@ export default {
         </div>
     </div>
 
-    <!-- ── Student Result Detail ────────────────────────────────────────────── -->
-    <div v-if="currentView === 'studentResultDetail'" class="container-fluid p-3">
-        <div class="card border-0 shadow-sm rounded-4">
-            <div class="card-header bg-white border-bottom p-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
-                <div>
-                    <h5 class="mb-1 fw-bold">{{ selectedReport?.name || selectedStudentResult?.name || 'Test Paper' }}</h5>
-                    <p class="text-muted mb-2"><i class="fas fa-user me-1"></i>{{ getStudentName(selectedStudentResult?.studentId, selectedStudentResult) }}</p>
-                    <div class="d-flex flex-wrap gap-3">
-                        <span>
-                            <i class="fas fa-star me-1 text-warning"></i>Score:
-                            <strong class="badge fs-6" :class="getScoreBadgeClass(selectedStudentResult?.score)">{{ selectedStudentResult?.score ?? '—' }}%</strong>
-                        </span>
-                        <span class="text-muted small"><i class="fas fa-check me-1 text-success"></i>{{ selectedStudentResult?.rawScore ?? '?' }} / {{ selectedStudentResult?.totalQuestions ?? '?' }} correct</span>
-                        <span class="text-muted small"><i class="fas fa-clock me-1"></i>{{ selectedStudentResult?.durationSeconds ? formatDuration(selectedStudentResult.durationSeconds) : '—' }}</span>
-                        <span class="text-muted small"><i class="fas fa-calendar me-1"></i>{{ selectedStudentResult?.completedAt ? new Date(selectedStudentResult.completedAt).toLocaleString() : '—' }}</span>
-                    </div>
-                </div>
-                <button class="btn btn-outline-secondary" @click="$router.push({ name: returnView || 'reportDetail' })">
-                    <i class="fas fa-arrow-left me-1"></i> Back
-                </button>
-            </div>
-
-            <div class="card-body p-4" style="max-height:75vh; overflow-y:auto">
-                <div v-if="!selectedQuestionsForPreview.length" class="text-center text-muted p-5">No questions found for this exam.</div>
-
-                <div v-for="(q, i) in selectedQuestionsForPreview" :key="q.id" class="card mb-3 border-0 shadow-sm">
-                    <div class="card-body">
-                        <!-- Question header -->
-                        <div class="d-flex justify-content-between align-items-start mb-1">
-                            <h6 class="fw-bold mb-0">Q{{ i + 1 }}. {{ q.text }}</h6>
-                            <span class="badge ms-2 flex-shrink-0" :class="isCorrect(q, selectedStudentResult) ? 'bg-success' : 'bg-danger'">
-                                {{ isCorrect(q, selectedStudentResult) ? '✓ Correct' : '✗ Wrong' }}
-                            </span>
-                        </div>
-                        <small class="text-muted d-block mb-3">
-                            {{ q.type }}
-                            <span v-if="q.cognitiveLevel"> · {{ q.cognitiveLevel }}</span>
-                            <span v-if="normalizeLO(q.loTags)"> · {{ normalizeLO(q.loTags) }}</span>
-                        </small>
-
-                        <!-- Multiple Choice -->
-                        <div v-if="q.type === 'Multiple Choice'">
-                            <div v-for="(opt, idx) in q.options" :key="idx" class="p-2 mb-2 rounded border position-relative" :class="mcOptionClass(q, idx, selectedStudentResult)">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center">
-                                        <span class="me-2 fw-bold">{{ String.fromCharCode(65 + idx) }}.</span>
-                                        <span>{{ opt.text }}</span>
-                                    </div>
-                                    <div class="d-flex gap-2">
-                                        <span v-if="isMcCorrect(q, idx, selectedStudentResult)" class="badge bg-success shadow-sm">
-                                            <i class="fas fa-check-circle me-1"></i>Correct Answer
-                                        </span>
-                                        <span v-if="isMcStudentAnswer(q, idx, selectedStudentResult)" class="badge shadow-sm" :class="isMcCorrect(q, idx, selectedStudentResult) ? 'bg-primary' : 'bg-danger'">
-                                            <i class="fas me-1" :class="isMcCorrect(q, idx, selectedStudentResult) ? 'fa-user-check' : 'fa-user-times'"></i>Your Answer
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- True or False -->
-                        <div v-else-if="q.type === 'True or False'">
-                            <div v-for="opt in ['True', 'False']" :key="opt" class="p-2 mb-2 rounded border position-relative" :class="tfOptionClass(q, opt, selectedStudentResult)">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <span>{{ opt }}</span>
-                                    <div class="d-flex gap-2">
-                                        <span v-if="opt === getCorrectTf(q)" class="badge bg-success shadow-sm">
-                                            <i class="fas fa-check-circle me-1"></i>Correct Answer
-                                        </span>
-                                        <span v-if="isTfStudentAnswer(q, opt, selectedStudentResult)" class="badge shadow-sm" :class="opt === getCorrectTf(q) ? 'bg-primary' : 'bg-danger'">
-                                            <i class="fas me-1" :class="opt === getCorrectTf(q) ? 'fa-user-check' : 'fa-user-times'"></i>Your Answer
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Identification -->
-                        <div v-else-if="q.type === 'Identification'" class="row g-3">
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border bg-success-subtle border-success">
-                                    <small class="d-block mb-1 fw-semibold text-success"><i class="fas fa-check-circle me-1"></i>Correct Answer</small>
-                                    <span class="fw-bold fs-6 text-success">{{ getCorrectId(q) || '—' }}</span>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border" :class="isCorrect(q, selectedStudentResult) ? 'bg-success-subtle border-success' : 'bg-danger-subtle border-danger'">
-                                    <small class="d-block mb-1 fw-semibold" :class="isCorrect(q, selectedStudentResult) ? 'text-success' : 'text-danger'">
-                                        <i class="fas me-1" :class="isCorrect(q, selectedStudentResult) ? 'fa-check-circle' : 'fa-times-circle'"></i>Your Answer
-                                    </small>
-                                    <span class="fw-bold fs-6" :class="isCorrect(q, selectedStudentResult) ? 'text-success' : 'text-danger'">
-                                        {{ getStudentAnswerValue(q, selectedStudentResult) || 'No Answer' }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Enumeration -->
-                        <div v-else-if="q.type === 'Enumeration'" class="row g-3">
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border bg-success-subtle border-success">
-                                    <small class="d-block mb-1 fw-semibold text-success"><i class="fas fa-check-circle me-1"></i>Expected Answers</small>
-                                    <ul class="mb-0 ps-3">
-                                        <li v-for="ans in getEnumAnswers(q)" :key="ans">{{ ans }}</li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border bg-light">
-                                    <small class="d-block mb-1 fw-semibold text-muted"><i class="fas fa-user me-1"></i>Your Answer</small>
-                                    <span class="fw-bold">{{ getStudentAnswerValue(q, selectedStudentResult) || 'No Answer' }}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- ── Student/Faculty Result Detail ──────────────────────────────────── -->
+    <StudentResultReview
+        v-if="currentView === 'studentResultDetail' && currentUser.role !== 'Faculty'"
+        :student-result="selectedStudentResult"
+        :report="selectedReport"
+        :return-view="returnView"
+        @back="handleBack($event)"
+        @retry="openStudentResult($event)"
+    />
+    <FacultyResultReview
+        v-if="currentView === 'studentResultDetail' && currentUser.role === 'Faculty'"
+        :student-result="selectedStudentResult"
+        :report="selectedReport"
+        :return-view="returnView"
+        @back="handleBack($event)"
+        @retry="openStudentResult($event)"
+    />
 </template>
 
 <style scoped>
 .cursor-pointer { cursor: pointer; }
+.border-transparent { border-color: transparent !important; }
 </style>

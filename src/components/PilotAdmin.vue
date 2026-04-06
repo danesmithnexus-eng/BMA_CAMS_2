@@ -40,7 +40,8 @@
                                         v-if="test.status === 'Pending Review' && (currentUser.role === 'Admin' || currentUser.role === 'Review Committee')"
                                         class="btn btn-sm btn-success me-2"
                                         @click="handleApproveTest(test)">Approve</button>
-                                    <button class="btn btn-sm btn-primary me-2" @click="handleManageTest(test)">Manage</button>
+                                    <button class="btn btn-sm btn-primary me-2"
+                                        @click="handleManageTest(test)">Manage</button>
                                     <button class="btn btn-sm btn-info" @click="openAssignStudentModal(test)">Assign
                                         Users</button>
                                 </td>
@@ -63,12 +64,14 @@
             <div class="card-header">Test Actions</div>
             <div class="card-body d-flex gap-2">
                 <button class="btn btn-outline-primary" @click="openAd10Preview"
-                    :disabled="!selectedTest?.questionIds || selectedTest.questionIds.length === 0">
-                    <i class="fas fa-eye me-2"></i>Preview Exam
+                    :disabled="assignableLoading">
+                    <i class="fas me-2" :class="assignableLoading ? 'fa-spinner fa-spin' : 'fa-eye'"></i>
+                    {{ assignableLoading ? 'Loading Preview...' : 'Preview Exam' }}
                 </button>
                 <button class="btn btn-outline-info" @click="openAd09Summary"
-                    :disabled="!selectedTest?.questionIds || selectedTest.questionIds.length === 0">
-                    <i class="fas fa-table me-2"></i>Preview Summary
+                    :disabled="assignableLoading">
+                    <i class="fas me-2" :class="assignableLoading ? 'fa-spinner fa-spin' : 'fa-table'"></i>
+                    {{ assignableLoading ? 'Loading Summary...' : 'Preview Summary' }}
                 </button>
                 <button class="btn btn-outline-secondary" @click="openAssignStudentModal(selectedTest)">
                     <i class="fas fa-users me-2"></i>Assign Users
@@ -76,23 +79,25 @@
             </div>
         </div>
         <div class="card">
-            <div class="card-header">Assigned Students</div>
+            <div class="card-header">Assigned Users</div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Student Name</th>
+                                <th>Name</th>
+                                <th>Role</th>
                                 <th>Status</th>
                                 <th>Score</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-if="assignedStudents.length === 0">
-                                <td colspan="3" class="text-center text-muted p-4">No students assigned yet.</td>
+                                <td colspan="4" class="text-center text-muted p-4">No users assigned yet.</td>
                             </tr>
                             <tr v-for="student in assignedStudents" :key="student.assignmentId">
                                 <td>{{ student.displayName }}</td>
+                                <td>{{ student.displayRole }}</td>
                                 <td>
                                     <span class="status-badge" :class="getStudentTestStatusClass(student)">
                                         {{ getStudentTestStatus(student) }}
@@ -127,16 +132,23 @@
                                         @change="toggleRoleSelection('Student')">
                                     <label class="form-check-label" for="role-select-student">All Students</label>
                                 </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="role-select-faculty"
+                                        value="Faculty" v-model="selectedRoles"
+                                        @change="toggleRoleSelection('Faculty')">
+                                    <label class="form-check-label" for="role-select-faculty">All Faculty</label>
+                                </div>
                             </div>
                         </div>
 
                         <h6>Available Users</h6>
                         <div class="user-selection-list" style="max-height: 300px; overflow-y: auto;">
                             <div v-if="assignableLoading" class="text-center text-muted py-3">
-                                Loading students...
+                                Loading users...
                             </div>
                             <div v-else-if="assignableStudents && assignableStudents.length > 0">
-                                <div v-for="student in assignableStudents" :key="student.assignmentId" class="form-check">
+                                <div v-for="student in assignableStudents" :key="student.assignmentId"
+                                    class="form-check">
                                     <input class="form-check-input" type="checkbox" :value="student.assignmentId"
                                         :id="'student-check-' + student.assignmentId" v-model="studentsToAssign">
                                     <label class="form-check-label" :for="'student-check-' + student.assignmentId">
@@ -190,6 +202,10 @@
 
                                     <div v-else-if="q.type === 'True or False'" class="ps-3">
                                         <p>___ True ___ False</p>
+                                    </div>
+
+                                    <div v-else-if="q.type === 'Identification' || q.type === 'Enumeration'" class="ps-3">
+                                        <p class="text-muted border-bottom d-inline-block" style="min-width: 200px;">&nbsp;</p>
                                     </div>
 
                                     <div v-else-if="q.type === 'Matching Type'" class="ps-3">
@@ -288,7 +304,7 @@ import { mapState, mapActions } from 'pinia';
 import { useAuthStore } from '../stores/auth';
 import { useTestStore } from '../stores/tests';
 import { useQuestionStore } from '../stores/questions';
-import { useUserStore } from '../stores/users'; // Assuming this exists or using AuthStore for users
+import { useUserStore } from '../stores/users';
 import { useUIStore } from '../stores/ui';
 import * as bootstrap from 'bootstrap';
 import api from '../services/api';
@@ -304,15 +320,14 @@ export default {
             assignableLoading: false,
             participantsCounts: {},
             selectedRoles: [],
-            // Modals
             assignStudentBsModal: null,
             ad10BsModal: null,
             ad09BsModal: null,
-            // Constants
             cognitiveLevels: ['Remembering', 'Understanding', 'Applying', 'Analyzing', 'Evaluating', 'Creating'],
             loTags: ['LO 1.0', 'LO 1.1', 'LO 1.2', 'LO 1.3', 'LO 1.4', 'LO 1.5', 'LO 1.6', 'LO 1.7', 'LO 1.8', 'LO 1.9', 'LO 1.10', 'LO 1.11', 'LO 1.12', 'LO 1.13', 'LO 1.14', 'LO 1.15', 'LO 1.16', 'LO 1.17', 'LO 1.18', 'LO 1.19', 'LO 2.0', 'LO 2.1', 'LO 2.2', 'LO 2.3', 'LO 2.4', 'LO 2.5', 'LO 2.6', 'LO 2.7', 'LO 2.8', 'LO 2.9', 'LO 2.10', 'LO 2.11', 'LO 2.12', 'LO 2.13', 'LO 2.14', 'LO 2.15', 'LO 2.16', 'LO 2.17', 'LO 2.18', 'LO 2.19', 'LO 3.0', 'LO 3.1', 'LO 3.2', 'LO 3.3', 'LO 3.4', 'LO 3.5']
         };
     },
+
     computed: {
         ...mapState(useAuthStore, { currentUser: 'user' }),
         ...mapState(useTestStore, ['pilotTests', 'studentTests']),
@@ -321,70 +336,89 @@ export default {
 
         availableStudents() {
             if (!this.users) return [];
-            // Filter strictly for users with the 'Student' role
             return this.users
                 .filter(u => {
                     const userRole = (u.role || u.roles || '').toString().toLowerCase();
-                    return userRole.includes('student');
+                    return userRole.includes('student') || userRole.includes('faculty');
                 })
                 .map(u => {
-                    // Find the actual student ID - check u.student.id or u.student_id
-                    // NEVER fallback to u.id as it's the user_id and will cause database errors
-                    const studentRecord = u.student || {};
-                    const studentId = Number(studentRecord.id || u.student_id || 0);
-
+                    const userRole = (u.role || u.roles || '').toString().toLowerCase();
+                    const assignmentId = userRole.includes('faculty')
+                        ? Number(u.id)
+                        : Number(u.student?.id || u.student_id || 0);
                     return {
                         ...u,
-                        assignmentId: studentId,
-                        displayName: u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim()
+                        assignmentId,
+                        displayName: u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim(),
+                        displayRole: userRole.includes('faculty') ? 'Faculty' : 'Student'
                     };
                 })
-                .filter(u => u.assignmentId > 0) // Ensure we only show students with valid IDs
+                .filter(u => u.assignmentId > 0)
                 .sort((a, b) => a.displayName.localeCompare(b.displayName));
         },
+
+        // ── FIXED: resolves both Student and Faculty users from studentTests ──
         aassignedStudents() {
             if (!this.selectedTest) return [];
-
             return this.studentTests
                 .filter(st => Number(st.testId) === Number(this.selectedTest.id))
                 .map(st => {
+                    const sid = Number(st.studentId);
 
-                    const user = this.users?.find(u => {
-                        if (!u.student || !u.student.id) return false;
-                        return Number(u.student.id) === Number(st.studentId);
-                    });
+                    // 1. Try matching as a student (has a student sub-object)
+                    let user = this.users?.find(u =>
+                        u.student && Number(u.student.id) === sid
+                    );
+
+                    // 2. Fall back to matching as faculty (uses u.id directly)
+                    if (!user) {
+                        user = this.users?.find(u => {
+                            const role = (u.role || u.roles || '').toString().toLowerCase();
+                            return role.includes('faculty') && Number(u.id) === sid;
+                        });
+                    }
 
                     if (!user) {
                         return {
-                            assignmentId: Number(st.studentId),
-                            displayName: 'Unknown Student #' + st.studentId,
+                            assignmentId: sid,
+                            displayName: 'Unknown User #' + sid,
+                            displayRole: 'Unknown',
                             ...st
                         };
                     }
 
+                    const role = (user.role || user.roles || '').toString().toLowerCase();
+                    const isFaculty = role.includes('faculty');
+                    const assignmentId = isFaculty
+                        ? Number(user.id)
+                        : Number(user.student?.id || 0);
+
                     return {
-                        ...user,
-                        assignmentId: Number(user.student.id),
-                        displayName:
-                            user.fullname ||
-                            user.name ||
-                            `${user.fname || ''} ${user.lname || ''}`.trim()
+                        ...st, // Preserve status, score, etc. from st
+                        ...user, // Add user details
+                        assignmentId,
+                        displayName: user.fullname || user.name || `${user.fname || ''} ${user.lname || ''}`.trim(),
+                        displayRole: isFaculty ? 'Faculty' : 'Student'
                     };
                 });
         },
+
         assignedStudents() {
             return this.aassignedStudents;
         },
+
         selectedQuestionsForPreview() {
             if (!this.selectedTest || !this.selectedTest.questionIds) return [];
             const ids = this.selectedTest.questionIds.map(id => Number(id));
             return this.questions.filter(q => ids.includes(Number(q.id)));
         },
+
         ad09SummaryData() {
             const summary = {};
             const rowTotals = {};
             const colTotals = {};
-
+            
+            // 1. Initialize summary for all predefined LOs
             this.loTags.forEach(lo => {
                 summary[lo] = {};
                 rowTotals[lo] = 0;
@@ -394,21 +428,63 @@ export default {
                 });
             });
 
+            // 2. Tally questions by LO and Cognitive Level
             this.selectedQuestionsForPreview.forEach(q => {
-                const lo = q.loTag || q.learning_outcomes_tag || '';
-                const cognitiveLevel = q.cognitiveLevel || q.cognitiveTag || '';
-                if (lo && summary[lo] && summary[lo][cognitiveLevel] !== undefined) {
+                // Check all possible property names for LO and normalize it
+                let loRaw = q.loTag || 
+                            (q.loTags && q.loTags.length ? q.loTags[0] : '') || 
+                            q.learning_outcome ||
+                            q.learning_outcomes_tag || 
+                            '';
+                
+                // Normalize LO format to match this.loTags (e.g., "LO 1.0")
+                const lo = loRaw ? loRaw.toString().trim().replace(/^(LO)(\d)/i, '$1 $2') : '';
+                
+                // Check all possible property names for Cognitive Level and normalize case
+                let clRaw = q.cognitiveLevel || q.cognitiveTag || q.cognitive_level || 'Remembering';
+                const cognitiveLevel = clRaw.toString().charAt(0).toUpperCase() + clRaw.toString().slice(1).toLowerCase();
+                
+                // Add LO dynamically if not in predefined list
+                if (lo && !summary[lo]) {
+                    summary[lo] = {};
+                    rowTotals[lo] = 0;
+                    this.cognitiveLevels.forEach(level => {
+                        summary[lo][level] = 0;
+                    });
+                }
+
+                if (lo && summary[lo] && this.cognitiveLevels.includes(cognitiveLevel)) {
                     summary[lo][cognitiveLevel]++;
                     rowTotals[lo]++;
-                    colTotals[cognitiveLevel]++;
+                    colTotals[cognitiveLevel] = (colTotals[cognitiveLevel] || 0) + 1;
                 }
             });
 
-            return { summary, rowTotals, colTotals, cognitiveLevels: this.cognitiveLevels };
+            // 3. Filter out LOs with zero questions for cleaner display
+            const activeSummary = {};
+            const activeRowTotals = {};
+            Object.keys(summary).forEach(lo => {
+                if (rowTotals[lo] > 0) {
+                    activeSummary[lo] = summary[lo];
+                    activeRowTotals[lo] = rowTotals[lo];
+                }
+            });
+
+            // If we have no active LOs, show the predefined ones as placeholders
+            const finalSummary = Object.keys(activeSummary).length > 0 ? activeSummary : summary;
+            const finalRowTotals = Object.keys(activeRowTotals).length > 0 ? activeRowTotals : rowTotals;
+
+            return { 
+                summary: finalSummary, 
+                rowTotals: finalRowTotals, 
+                colTotals, 
+                cognitiveLevels: this.cognitiveLevels 
+            };
         }
     },
+
     methods: {
-        ...mapActions(useTestStore, ['approveTest', 'assignStudentsToTest', 'unassignStudentsFromTest', 'unassignStudentFromTest', 'addTest']),
+        ...mapActions(useTestStore, ['approveTest', 'assignStudentsToTest', 'unassignStudentsFromTest', 'unassignStudentFromTest', 'addTest', 'fetchTestAssignments']),
         ...mapActions(useQuestionStore, ['addQuestion', 'updateQuestion']),
         ...mapActions(useUserStore, ['fetchUsers']),
         ...mapActions(useUIStore, ['showToast']),
@@ -418,10 +494,8 @@ export default {
                 const { data } = await api.get('/exams');
                 const exams = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
                 exams.forEach(ex => {
-                    // Confirmed by backend: 'question_id' is the primary field
                     const qidsRaw = ex.question_id || (ex.exam_questions || []).map(eq => eq.question_id || eq.id);
                     const qids = Array.isArray(qidsRaw) ? [...new Set(qidsRaw.map(Number))] : [];
-
                     const statusLabel = (() => {
                         const s = (ex.status || '').toString().toLowerCase();
                         if (s === 'active' || s === 'approved') return 'Active';
@@ -429,58 +503,29 @@ export default {
                         if (s === 'completed') return 'Completed';
                         return 'Pending Review';
                     })();
-
                     const test = {
                         id: ex.id,
                         name: ex.name || ex.description || `Exam ${ex.id}`,
                         description: ex.description || '',
-                        // Confirmed by backend: 'terms' is the field name
                         term: ex.terms || ex.term || 'Midterm',
                         timeLimit: Number(ex.time_limit || 60),
                         questionIds: qids,
                         status: statusLabel
                     };
                     this.addTest(test);
-
-                    // Confirmed by backend: assignments use 'student_id' as an array or via relation
-                    const studentIdsRaw =
-                        ex.student_id ||
-                        ex.student_ids ||
-                        ex.student_exam_assignments ||
-                        ex.assignments ||
-                        [];
-
+                    const studentIdsRaw = ex.student_id || ex.student_ids || ex.student_exam_assignments || ex.assignments || [];
                     const studentIds = Array.isArray(studentIdsRaw)
-                        ? studentIdsRaw
-                            .map(s => {
-                                if (typeof s === 'number' || typeof s === 'string') {
-                                    return Number(s);
-                                }
-
-                                if (s && typeof s === 'object') {
-                                    // prefer loaded student relation
-                                    if (s.student && s.student.id) {
-                                        return Number(s.student.id);
-                                    }
-
-                                    // fallback only to explicit student_id fields
-                                    if (s.student_id != null) {
-                                        return Number(s.student_id);
-                                    }
-
-                                    if (s.studentId != null) {
-                                        return Number(s.studentId);
-                                    }
-                                }
-
-                                return null;
-                            })
-                            .filter(n => Number.isInteger(n) && n > 0)
+                        ? studentIdsRaw.map(s => {
+                            if (typeof s === 'number' || typeof s === 'string') return Number(s);
+                            if (s && typeof s === 'object') {
+                                if (s.student && s.student.id) return Number(s.student.id);
+                                if (s.student_id != null) return Number(s.student_id);
+                                if (s.studentId != null) return Number(s.studentId);
+                            }
+                            return null;
+                        }).filter(n => Number.isInteger(n) && n > 0)
                         : [];
-
-                    if (studentIds.length) {
-                        this.assignStudentsToTest(test.id, studentIds, test);
-                    }
+                    if (studentIds.length) this.assignStudentsToTest(test.id, studentIds, test);
                 });
                 if (!exams || exams.length === 0) {
                     this.showToast('Warning', 'No exams found in the database.', 'warning');
@@ -490,6 +535,7 @@ export default {
                 this.showToast('Error', msg, 'error');
             }
         },
+
         async refreshParticipantsCountFor(testId) {
             try {
                 const res = await api.get('/get-student', { params: { exam_id: testId } });
@@ -500,10 +546,9 @@ export default {
                     return acc + (assigned ? 1 : 0);
                 }, 0);
                 this.participantsCounts = { ...this.participantsCounts, [testId]: count };
-            } catch (_) {
-                // ignore; fallback to store-based count
-            }
+            } catch (_) { }
         },
+
         async refreshAllParticipantsCounts() {
             for (const t of this.pilotTests) {
                 await this.refreshParticipantsCountFor(t.id);
@@ -523,7 +568,7 @@ export default {
                         try {
                             const r2 = await api.get(`/exam/${this.selectedTest.id}`);
                             ex = r2?.data?.data || r2?.data || null;
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                     if (!ex) {
                         try {
@@ -535,7 +580,7 @@ export default {
                                 return n && m && n === m;
                             }) || null;
                             ex = match || null;
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                     if (ex) {
                         const qidsRaw = ex.question_id || (ex.exam_questions || []).map(eq => eq.question_id || eq.id);
@@ -571,19 +616,13 @@ export default {
                     try {
                         let d = null;
                         let lastErr = null;
-                        const endpoints = [
-                            `/questions/${qid}`,
-                            `/question/${qid}`,
-                            `/questions?id=${qid}`
-                        ];
+                        const endpoints = [`/questions/${qid}`, `/question/${qid}`, `/questions?id=${qid}`];
                         for (const ep of endpoints) {
                             try {
                                 const res = await api.get(ep);
                                 d = res?.data?.data || res?.data || null;
                                 if (d) break;
-                            } catch (e) {
-                                lastErr = e;
-                            }
+                            } catch (e) { lastErr = e; }
                         }
                         if (!d) throw lastErr || new Error('No question data');
                         const typeLabel = (() => {
@@ -616,16 +655,11 @@ export default {
                         const loRaw = d.learning_outcome || '';
                         const loNorm = loRaw ? loRaw.replace(/^(LO)(\d)/i, '$1 $2') : '';
                         const payload = {
-                            id: d.id || qid,
-                            text: d.text || '',
-                            status: 'Approved',
-                            program: existing?.program || '',
-                            course: existing?.course || '',
-                            type: typeLabel,
-                            loTags: loNorm ? [loNorm] : (existing?.loTags || []),
+                            id: d.id || qid, text: d.text || '', status: 'Approved',
+                            program: existing?.program || '', course: existing?.course || '',
+                            type: typeLabel, loTags: loNorm ? [loNorm] : (existing?.loTags || []),
                             cognitiveLevel: d.cognitive_level || existing?.cognitiveLevel || 'Remembering',
-                            options,
-                            pairs
+                            options, pairs
                         };
                         if (existing) this.updateQuestion(payload);
                         else this.addQuestion(payload);
@@ -663,21 +697,14 @@ export default {
                             const loRaw = d.learning_outcome || '';
                             const loNorm = loRaw ? loRaw.replace(/^(LO)(\d)/i, '$1 $2') : '';
                             const payload = {
-                                id: Number(d.id || qid),
-                                text: d.text || '',
-                                status: 'Approved',
-                                program: existing?.program || '',
-                                course: existing?.course || '',
-                                type: typeLabel,
-                                loTags: loNorm ? [loNorm] : (existing?.loTags || []),
+                                id: Number(d.id || qid), text: d.text || '', status: 'Approved',
+                                program: existing?.program || '', course: existing?.course || '',
+                                type: typeLabel, loTags: loNorm ? [loNorm] : (existing?.loTags || []),
                                 cognitiveLevel: d.cognitive_level || existing?.cognitiveLevel || 'Remembering',
-                                options,
-                                pairs
+                                options, pairs
                             };
                             if (existing) this.updateQuestion(payload);
                             else this.addQuestion(payload);
-                        } else {
-                           
                         }
                     }
                 }
@@ -688,53 +715,35 @@ export default {
 
         setView(view) {
             this.currentView = view;
-            if (view === 'pilotAdmin') {
-                this.selectedTest = null;
-            }
+            if (view === 'pilotAdmin') this.selectedTest = null;
         },
-        toggleRoleSelection(role) {
-            const usersInRole = this.assignableStudents;
-            const assignmentIdsInRole = usersInRole.map(u => Number(u.assignmentId));
 
+        toggleRoleSelection(role) {
+            const usersInRole = this.assignableStudents.filter(u =>
+                (u.role || '').toString().toLowerCase().includes(role.toLowerCase())
+            );
+            const assignmentIdsInRole = usersInRole.map(u => Number(u.assignmentId));
             if (this.selectedRoles.includes(role)) {
                 assignmentIdsInRole.forEach(id => {
-                    if (!this.studentsToAssign.includes(id)) {
-                        this.studentsToAssign.push(id);
-                    }
+                    if (!this.studentsToAssign.includes(id)) this.studentsToAssign.push(id);
                 });
             } else {
                 this.studentsToAssign = this.studentsToAssign.filter(id => !assignmentIdsInRole.includes(id));
             }
         },
+
         handleApproveTest(test) {
             (async () => {
                 let ok = false;
                 let lastErr = null;
-                const endpoints = [
-                    `/exams/${test.id}`,
-                    `/exam/${test.id}`,
-                    `/exams/${test.id}/approve`,
-                    `/exam/${test.id}/approve`
-                ];
+                const endpoints = [`/exams/${test.id}`, `/exam/${test.id}`, `/exams/${test.id}/approve`, `/exam/${test.id}/approve`];
                 const statuses = ['Active', 'active', 'Approved', 'approved'];
                 for (const ep of endpoints) {
                     if (ep.endsWith('/approve')) {
-                        try {
-                            await api.post(ep);
-                            ok = true;
-                            break;
-                        } catch (e) {
-                            lastErr = e;
-                        }
+                        try { await api.post(ep); ok = true; break; } catch (e) { lastErr = e; }
                     } else {
                         for (const st of statuses) {
-                            try {
-                                await api.put(ep, { status: st });
-                                ok = true;
-                                break;
-                            } catch (e) {
-                                lastErr = e;
-                            }
+                            try { await api.put(ep, { status: st }); ok = true; break; } catch (e) { lastErr = e; }
                         }
                     }
                     if (ok) break;
@@ -748,17 +757,13 @@ export default {
                 }
             })();
         },
+
         async handleManageTest(test) {
             this.selectedTest = test;
             this.setView('manageTest');
-            await this.ensureSelectedTestQuestionsLoaded();
-            await this.openAd10Preview();
+            await this.fetchTestAssignments(test.id);
         },
-        async viewSelectedQuestions(test) {
-            this.selectedTest = test;
-            await this.ensureSelectedTestQuestionsLoaded();
-            await this.openAd10Preview();
-        },
+
         async openAssignStudentModal(test) {
             this.selectedTest = test;
             this.selectedRoles = [];
@@ -769,39 +774,67 @@ export default {
                 try {
                     const r1 = await api.get('/get-student', { params: { exam_id: test.id } });
                     list = Array.isArray(r1?.data?.data) ? r1.data.data : (Array.isArray(r1?.data) ? r1.data : []);
-                } catch (_) {}
+                } catch (_) { }
                 if (!Array.isArray(list) || list.length === 0) {
                     try {
                         const r2 = await api.get(`/get-student/${test.id}`);
                         list = Array.isArray(r2?.data?.data) ? r2.data.data : (Array.isArray(r2?.data) ? r2.data : []);
-                    } catch (_) {}
+                    } catch (_) { }
                 }
+
+                // ── FIXED: map both students and faculty from the API list ──
                 const mapped = (list || []).map(it => {
+                    const role = (it.role || it.roles || '').toString().toLowerCase();
+                    const isFaculty = role.includes('faculty');
+
+                    // Faculty use their top-level id; students use student_id / student.id
                     const sid = Number(
-                        it.student_id != null ? it.student_id :
-                        it.assignment_id != null ? it.assignment_id :
-                        it.id != null ? it.id :
-                        it.student && it.student.id ? it.student.id : 0
+                        isFaculty
+                            ? (it.id != null ? it.id : 0)
+                            : (it.student_id != null ? it.student_id
+                                : it.assignment_id != null ? it.assignment_id
+                                    : it.id != null ? it.id
+                                        : it.student && it.student.id ? it.student.id : 0)
                     );
+
                     const name = it.fullname || it.name || `${it.fname || ''} ${it.lname || ''}`.trim();
                     const assignedRaw = it.is_assigned;
-                    const assigned = assignedRaw === true || assignedRaw === 1 || assignedRaw === '1' || (typeof assignedRaw === 'string' && assignedRaw.toLowerCase() === 'true');
+                    const assigned = assignedRaw === true || assignedRaw === 1 || assignedRaw === '1'
+                        || (typeof assignedRaw === 'string' && assignedRaw.toLowerCase() === 'true');
+
                     return {
                         assignmentId: sid,
-                        displayName: name || `Student #${sid}`,
-                        role: it.role || 'Student',
+                        displayName: name || `${isFaculty ? 'Faculty' : 'Student'} #${sid}`,
+                        role: isFaculty ? 'Faculty' : 'Student',
                         is_assigned: assigned
                     };
-                }).filter(s => Number.isInteger(s.assignmentId) && s.assignmentId > 0)
-                  .sort((a, b) => a.displayName.localeCompare(b.displayName));
+                })
+                    .filter(s => Number.isInteger(s.assignmentId) && s.assignmentId > 0)
+                    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
                 if (mapped.length === 0 && Array.isArray(this.users) && this.users.length > 0) {
+                    // ── FIXED: fallback also includes faculty users ──
                     const fallback = this.users
-                        .filter(u => ((u.role || u.roles || '').toString().toLowerCase().includes('student')))
+                        .filter(u => {
+                            const role = (u.role || u.roles || '').toString().toLowerCase();
+                            return role.includes('student') || role.includes('faculty');
+                        })
                         .map(u => {
-                            const sid = Number(u?.student?.id || u?.student_id || 0);
+                            const role = (u.role || u.roles || '').toString().toLowerCase();
+                            const isFaculty = role.includes('faculty');
+                            const sid = isFaculty
+                                ? Number(u.id)
+                                : Number(u?.student?.id || u?.student_id || 0);
                             const name = u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim();
-                            const assigned = this.studentTests.some(st => Number(st.testId) === Number(test.id) && Number(st.studentId) === sid);
-                            return { assignmentId: sid, displayName: name || `Student #${sid}`, role: 'Student', is_assigned: assigned };
+                            const assigned = this.studentTests.some(
+                                st => Number(st.testId) === Number(test.id) && Number(st.studentId) === sid
+                            );
+                            return {
+                                assignmentId: sid,
+                                displayName: name || `${isFaculty ? 'Faculty' : 'Student'} #${sid}`,
+                                role: isFaculty ? 'Faculty' : 'Student',
+                                is_assigned: assigned
+                            };
                         })
                         .filter(s => Number.isInteger(s.assignmentId) && s.assignmentId > 0)
                         .sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -811,104 +844,205 @@ export default {
                     this.assignableStudents = mapped;
                     this.studentsToAssign = mapped.filter(s => s.is_assigned).map(s => Number(s.assignmentId));
                 }
-                this.participantsCounts[test.id] = mapped.filter(s => s.is_assigned).length;
+                this.participantsCounts[test.id] = (this.assignableStudents).filter(s => s.is_assigned).length;
             } catch (e) {
                 this.assignableStudents = [];
                 this.studentsToAssign = [];
-                const msg = e?.response?.data?.message || e?.message || 'Failed to load students.';
+                const msg = e?.response?.data?.message || e?.message || 'Failed to load users.';
                 this.showToast('Error', msg, 'error');
             } finally {
                 this.assignableLoading = false;
             }
 
-            await this.ensureSelectedTestQuestionsLoaded();
             if (this.ad10BsModal) this.ad10BsModal.hide();
             if (this.assignStudentBsModal) this.assignStudentBsModal.show();
         },
+
         assignStudents() {
             if (!this.selectedTest) {
                 this.showToast('Error', 'No test selected.', 'error');
                 return;
             }
-            const ids = Array.isArray(this.studentsToAssign) ? [...new Set(this.studentsToAssign.map(Number))] : [];
+
+            const ids = Array.isArray(this.studentsToAssign)
+                ? [...new Set(this.studentsToAssign.map(Number))]
+                : [];
+
             const prevIds = Array.isArray(this.assignableStudents)
                 ? this.assignableStudents.filter(s => s.is_assigned).map(s => Number(s.assignmentId))
                 : [];
+
             const toAssign = ids.filter(id => !prevIds.includes(id));
             const toUnassign = prevIds.filter(id => !ids.includes(id));
+
             if (toAssign.length === 0 && toUnassign.length === 0) {
                 if (this.assignStudentBsModal) this.assignStudentBsModal.hide();
                 this.showToast('Info', 'No changes to assignments.', 'info');
                 return;
             }
+
             const body = {
                 exam_id: Number(this.selectedTest.id),
-                student_id: ids
+                student_id: ids,
             };
-            // Use backend sync endpoint to update assignment statuses
-            const endpoint = '/student-exam-assignments/sync';
-            let ok = false;
-            let lastErr = null;
+
             (async () => {
                 try {
-                    await api.put(endpoint, body);
-                    ok = true;
-                } catch (e) {
-                    lastErr = e;
-                }
+                    const res = await api.put('/student-exam-assignments/sync', body);
 
-                if (ok) {
-                    toUnassign.forEach(id => this.unassignStudentFromTest(this.selectedTest.id, id));
-                    if (toAssign.length > 0) this.assignStudentsToTest(this.selectedTest.id, toAssign, this.selectedTest);
+                    const assignments = Array.isArray(res?.data?.data)
+                        ? res.data.data
+                        : (Array.isArray(res?.data) ? res.data : []);
+
+                    console.log('[PilotAdmin] Sync response assignments:', assignments);
+
+                    // Remove unassigned users from local store
+                    toUnassign.forEach(id =>
+                        this.unassignStudentFromTest(this.selectedTest.id, id)
+                    );
+
+                    // Add newly assigned users, injecting the server-issued assignmentId
+                    const testStore = useTestStore();
+                    toAssign.forEach(studentId => {
+                        const serverRecord = assignments.find(a =>
+                            Number(a.student_id ?? a.studentId ?? a.student?.id) === studentId
+                        );
+                        const assignmentId = serverRecord ? Number(serverRecord.id) : null;
+
+                        if (!assignmentId) {
+                            console.warn('[PilotAdmin] No assignmentId returned for studentId', studentId,
+                                '— user will not be able to save answers until page is refreshed');
+                        }
+
+                        const existingIdx = testStore.studentTests.findIndex(
+                            st => Number(st.testId) === Number(this.selectedTest.id)
+                                && Number(st.studentId) === studentId
+                        );
+
+                        const row = {
+                            studentId: studentId,
+                            testId: Number(this.selectedTest.id),
+                            assignmentId: assignmentId,
+                            name: this.selectedTest.name,
+                            status: 'Not Started',
+                            score: null,
+                            answers: {},
+                            startedAt: null,
+                            completedAt: null,
+                        };
+
+                        if (existingIdx >= 0) {
+                            testStore.studentTests[existingIdx] = {
+                                ...testStore.studentTests[existingIdx],
+                                ...row,
+                            };
+                        } else {
+                            testStore.studentTests.push(row);
+                        }
+                    });
+
                     if (this.assignStudentBsModal) this.assignStudentBsModal.hide();
                     this.showToast('Success', 'Assignments synced successfully.', 'success');
                     await this.refreshParticipantsCountFor(this.selectedTest.id);
-                } else {
-                    const msg = lastErr?.response?.data?.message || lastErr?.message || 'Failed to sync assignments.';
+
+                } catch (e) {
+                    const msg = e?.response?.data?.message || e?.message || 'Failed to sync assignments.';
                     this.showToast('Error', msg, 'error');
                 }
             })();
         },
+
         async openAd10Preview() {
-            await this.ensureSelectedTestQuestionsLoaded();
-            if (this.ad10BsModal) this.ad10BsModal.show();
-        },
-        async openAd09Summary() {
-            await this.ensureSelectedTestQuestionsLoaded();
-            if (!this.selectedQuestionsForPreview.length) {
-                this.showToast('Error', 'No questions available to summarize for this exam.', 'error');
-                return;
+            if (!this.selectedTest) return;
+            
+            this.assignableLoading = true; // Reuse this or add a new loading state
+            try {
+                const testStore = useTestStore();
+                const refreshed = await testStore.ensureTestReady(this.selectedTest.id);
+                if (refreshed) {
+                    this.selectedTest = {
+                        ...this.selectedTest,
+                        ...refreshed
+                    };
+                }
+                
+                if (this.ad10BsModal) this.ad10BsModal.show();
+            } catch (error) {
+                this.showToast('Error', 'Failed to load exam preview.', 'error');
+            } finally {
+                this.assignableLoading = false;
             }
-            if (this.ad09BsModal) this.ad09BsModal.show();
         },
+
+        async openAd09Summary() {
+            if (!this.selectedTest) return;
+            
+            this.assignableLoading = true;
+            try {
+                const testStore = useTestStore();
+                const refreshed = await testStore.ensureTestReady(this.selectedTest.id);
+                if (refreshed) {
+                    this.selectedTest = {
+                        ...this.selectedTest,
+                        ...refreshed
+                    };
+                }
+                
+                if (!this.selectedQuestionsForPreview.length) {
+                    this.showToast('Error', 'No questions available to summarize for this exam.', 'error');
+                    return;
+                }
+                if (this.ad09BsModal) this.ad09BsModal.show();
+            } catch (error) {
+                this.showToast('Error', 'Failed to load exam summary.', 'error');
+            } finally {
+                this.assignableLoading = false;
+            }
+        },
+
         printPreview(elementId) {
-            // Basic print functionality
             window.print();
         },
+
         getParticipantsCount(test) {
             const fromApi = this.participantsCounts?.[test.id];
             if (Number.isFinite(fromApi)) return fromApi;
             return this.studentTests.filter(st => st.testId === test.id).length;
         },
+
         getProgress(test) {
             const assignedCount = this.getParticipantsCount(test);
             if (!assignedCount) return 0;
             const completed = this.studentTests.filter(st => st.testId === test.id && st.status === 'Completed').length;
             return Math.round((completed / assignedCount) * 100);
         },
+
+        // ── FIXED: all three methods now use Number() for safe numeric comparison ──
         getStudentTestStatus(student) {
-            const st = this.studentTests.find(s => s.studentId === student.assignmentId && s.testId === this.selectedTest.id);
+            const st = this.studentTests.find(
+                s => Number(s.studentId) === Number(student.assignmentId)
+                    && Number(s.testId) === Number(this.selectedTest.id)
+            );
             return st ? st.status : 'Not Assigned';
         },
+
         getStudentTestStatusClass(student) {
-            const st = this.studentTests.find(s => s.studentId === student.assignmentId && s.testId === this.selectedTest.id);
-            return st && st.status === 'Completed' ? 'badge bg-success' : 'badge bg-secondary';
+            const st = this.studentTests.find(
+                s => Number(s.studentId) === Number(student.assignmentId)
+                    && Number(s.testId) === Number(this.selectedTest.id)
+            );
+            return st?.status === 'Completed' ? 'badge bg-success' : 'badge bg-secondary';
         },
+
         getStudentTestScore(student) {
-            const st = this.studentTests.find(s => s.studentId === student.assignmentId && s.testId === this.selectedTest.id);
+            const st = this.studentTests.find(
+                s => Number(s.studentId) === Number(student.assignmentId)
+                    && Number(s.testId) === Number(this.selectedTest.id)
+            );
             return st ? st.score : null;
         }
     },
+
     mounted() {
         this.fetchUsers();
         if (this.$refs.assignStudentModal) this.assignStudentBsModal = new bootstrap.Modal(this.$refs.assignStudentModal);
@@ -918,6 +1052,7 @@ export default {
         if (ad09El) this.ad09BsModal = new bootstrap.Modal(ad09El);
         this.fetchExams().then(() => this.refreshAllParticipantsCounts());
     },
+
     watch: {
         '$route.name': {
             immediate: true,
@@ -927,13 +1062,11 @@ export default {
                     this.fetchExams().then(() => this.refreshAllParticipantsCounts());
                 } else if (name === 'manageTest') {
                     this.setView('manageTest');
-                    if (this.selectedTest) {
-                        this.ensureSelectedTestQuestionsLoaded();
-                    }
                 }
             }
         }
     },
+
     beforeUnmount() {
         if (this.assignStudentBsModal) this.assignStudentBsModal.dispose();
         if (this.ad10BsModal) this.ad10BsModal.dispose();
@@ -949,7 +1082,6 @@ export default {
     font-size: 0.875em;
 }
 
-/* Printable Area Styles */
 @media print {
     body * {
         visibility: hidden;

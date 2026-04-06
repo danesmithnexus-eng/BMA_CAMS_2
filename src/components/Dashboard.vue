@@ -36,7 +36,7 @@
                 </div>
             </div>
             <div class="col-md-4 mb-4"
-                v-if="!['Collecting Officer', 'Review Committee', 'Assessor'].includes(currentUser.role)">
+                v-if="!['Collecting Officer', 'Review Committee'].includes(currentUser.role)">
                 <div class="card stat-card h-100 cursor-pointer" @click="setView('pilotAdmin')">
                     <div class="card-body">
                         <div class="stat-icon bg-warning text-white"><i class="fas fa-clipboard-check"></i></div>
@@ -48,7 +48,7 @@
                 </div>
             </div>
             <div class="col-md-4 mb-4"
-                v-if="!['Collecting Officer', 'Review Committee', 'Assessor'].includes(currentUser.role)">
+                v-if="!['Collecting Officer', 'Review Committee'].includes(currentUser.role)">
                 <div class="card stat-card h-100 cursor-pointer" @click="setView('pilotAdmin')">
                     <div class="card-body">
                         <div class="stat-icon bg-primary-accent text-white"><i class="fas fa-check-circle"></i></div>
@@ -181,7 +181,7 @@ export default {
         }
     },
     methods: {
-        ...mapActions(useTestStore, ['setActiveTest', 'setSelectedReport', 'setSelectedStudentResult', 'ensureTestReady']),
+        ...mapActions(useTestStore, ['setActiveTestById', 'setSelectedReport', 'setSelectedStudentResult']),
         
         setView(viewName, filterStatus = null) {
             if (viewName === 'questionBank' && filterStatus) {
@@ -192,9 +192,10 @@ export default {
         },
         
         async startTest(test) {
-             const ensured = await this.ensureTestReady(test.id);
-             this.setActiveTest(ensured || test);
-             this.$router.push({ name: 'testTaking', params: { id: test.id } });
+             const examId = test.id;
+             
+             // Navigate with exam ID only - questions will be loaded by setActiveTestById
+             this.$router.push({ name: 'testTaking', params: { id: examId } });
         },
         
         viewStudentTestResult(test) {

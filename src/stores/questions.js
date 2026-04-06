@@ -31,10 +31,22 @@ export const useQuestionStore = defineStore('questions', {
             });
             return groups;
         },
-        hasDrafts: (state) => state.questions.some(q => q.status === 'Draft'),
-        hasPendingValidation: (state) => state.questions.some(q => q.status === 'Pending Validation'),
-        hasPendingApproval: (state) => state.questions.some(q => q.status === 'Pending Approval'),
-        approvedQuestions: (state) => state.questions.filter(q => q.status === 'Approved')
+        hasDrafts: (state) => state.questions.some(q => {
+            const s = (q.status || '').toString().toLowerCase();
+            return s === 'draft';
+        }),
+        hasPendingValidation: (state) => state.questions.some(q => {
+            const s = (q.status || '').toString().toLowerCase();
+            return s === 'pending_validation' || s === 'pending validation' || s === 'inactive';
+        }),
+        hasPendingApproval: (state) => state.questions.some(q => {
+            const s = (q.status || '').toString().toLowerCase();
+            return s === 'pending_approval' || s === 'pending approval' || s === 'validated';
+        }),
+        approvedQuestions: (state) => state.questions.filter(q => {
+            const s = (q.status || '').toString().toLowerCase();
+            return s === 'active' || s === 'approved';
+        })
     },
     actions: {
         addQuestion(question) {
@@ -71,8 +83,18 @@ export const useQuestionStore = defineStore('questions', {
             };
         },
         batchUpdateStatus(fromStatus, toStatus) {
+            const canonical = (s) => {
+                const val = (s || '').toString().toLowerCase();
+                if (val === 'draft') return 'Draft';
+                if (val === 'pending_validation' || val === 'pending validation' || val === 'inactive') return 'Pending Validation';
+                if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
+                if (val === 'active' || val === 'approved') return 'Approved';
+                return 'Draft';
+            };
+            
+            const target = canonical(fromStatus);
             this.questions.forEach(q => {
-                if (q.status === fromStatus) {
+                if (canonical(q.status) === target) {
                     q.status = toStatus;
                 }
             });
@@ -80,7 +102,12 @@ export const useQuestionStore = defineStore('questions', {
         // FIX: only clears questions matching the given status, not everything
         clearAll(status) {
             if (status) {
-                this.questions = this.questions.filter(q => q.status !== status);
+                const target = status.toString().toLowerCase();
+                this.questions = this.questions.filter(q => {
+                    const s = (q.status || '').toString().toLowerCase();
+                    // Keep the question if its status DOES NOT match the target status to be cleared
+                    return s !== target;
+                });
             } else {
                 this.questions = [];
             }

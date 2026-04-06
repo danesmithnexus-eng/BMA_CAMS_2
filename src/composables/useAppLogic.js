@@ -261,8 +261,11 @@ export function useAppLogic() {
                     case 'Review Committee':
                         filters.value.status = 'Pending Approval';
                         break;
+                    case 'Assessor':
+                    case 'Admin':
                     default:
                         filters.value.status = 'All'; // Admin or other roles see all by default
+                        break;
                 }
             }
         }
