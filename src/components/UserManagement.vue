@@ -415,10 +415,53 @@ export default {
 
     async handleUserAction(actionType) {
       if (actionType === 'save') {
-        if (!this.editingUser.fname || !this.editingUser.lname || !this.editingUser.email || !this.editingUser.role || !this.editingUser.username) {
-          this.showToast('Error', 'Please fill in all required fields.', 'error');
+        const requiredFields = ['fname', 'lname', 'email', 'role', 'username'];
+        const missingFields = requiredFields.filter(field => !this.editingUser[field]);
+
+        if (missingFields.length > 0) {
+          const fieldLabels = {
+            fname: 'First Name',
+            lname: 'Last Name',
+            email: 'Email',
+            role: 'Role',
+            username: 'Username'
+          };
+          const labels = missingFields.map(f => fieldLabels[f]).join(', ');
+          this.showNotification('Missing Fields', `Please fill in the following required fields: ${labels}`, 'error');
           return;
         }
+
+        // Student-specific required fields
+        if (this.editingUser.role === 'Student') {
+          const studentFields = ['year_level', 'class_name', 'program_id', 'student_number'];
+          const missingStudentFields = studentFields.filter(field => !this.editingUser[field]);
+          
+          if (missingStudentFields.length > 0) {
+            const studentLabels = {
+              year_level: 'Year',
+              class_name: 'Class',
+              program_id: 'Program',
+              student_number: 'Student Number'
+            };
+            const labels = missingStudentFields.map(f => studentLabels[f]).join(', ');
+            this.showNotification('Missing Student Fields', `Please fill in the following student details: ${labels}`, 'error');
+            return;
+          }
+        }
+
+        // Password validation: only for new users OR if showUserPassword is checked
+        if (!this.editingUser.id || this.showUserPassword) {
+          const password = this.editingUser.password || '';
+          if (!password) {
+            this.showNotification('Password Required', 'Please set a password for the user.', 'error');
+            return;
+          }
+          if (password.length < 8) {
+            this.showNotification('Weak Password', 'The password must be at least 8 characters long.', 'error');
+            return;
+          }
+        }
+
         await this.handleSave();
       } else if (actionType === 'archive') {
         await this.handleArchive();
@@ -427,6 +470,7 @@ export default {
 
     async handleSave() {
       try {
+        const isNewUser = !this.editingUser.id;
         // Prepare user data for saving
         const userData = { ...this.editingUser };
         const changedPassword = Boolean(userData.id && userData.password && String(userData.password).length > 0);
@@ -447,17 +491,24 @@ export default {
         
         console.log('Sending user data to update:', userData);
         await this.saveUser(userData);
-        if (changedPassword) {
-          this.showNotification('Success', 'Password changed successfully.', 'success');
+        
+        if (isNewUser) {
+          this.showNotification('Success', 'User created successfully.', 'success');
+        } else if (changedPassword) {
+          this.showNotification('Success', 'User updated and password changed successfully.', 'success');
         } else {
-          this.showToast('Success', userData.id ? 'User updated successfully.' : 'User added successfully.', 'success');
+          this.showNotification('Success', 'User updated successfully.', 'success');
         }
+        
         if (this.userEditorBsModal) this.userEditorBsModal.hide();
       } catch (error) {
         console.error('Error saving user:', error);
         console.error('Error response:', error.response?.data);
-        const errorMsg = error.response?.data?.message || error.response?.data?.errors ? JSON.stringify(error.response?.data?.errors) : 'Failed to save user.';
-        this.showToast('Error', errorMsg, 'error');
+        
+        const errorMsg = error.response?.data?.message || 
+                         (error.response?.data?.errors ? Object.values(error.response.data.errors).flat().join(' ') : 'Failed to save user.');
+        
+        this.showNotification('Save Failed', errorMsg, 'error');
       }
     },
 

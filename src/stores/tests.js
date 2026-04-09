@@ -66,7 +66,6 @@ export const useTestStore = defineStore('tests', {
         setSelectedStudentResult(result) { this.selectedStudentResult = result; },
         setSelectedTest(test) { this.selectedTest = test; },
 
-        // ─── Type / payload helpers ────────────────────────────────────────────
 
         _resolveTypeLabel(d) {
             const id = d.question_type_id;
@@ -86,6 +85,7 @@ export const useTestStore = defineStore('tests', {
             return 'Multiple Choice';
         },
 
+        // ── FIX: expanded field lookups for loTags and cognitiveLevel ──────────
         _buildQuestionPayload(d, existingQuestion = null) {
             const typeLabel = this._resolveTypeLabel(d);
             let options = [];
@@ -113,8 +113,38 @@ export const useTestStore = defineStore('tests', {
                 })) : [];
             }
 
-            const loRaw = d.learning_outcome || d.lo || d.learning_outcomes || '';
-            const loNorm = loRaw ? loRaw.replace(/^(LO)(\d)/i, '$1 $2') : '';
+            // ── FIX: cast a wide net for learning outcome field names ──────────
+            const loRaw =
+                d.learning_outcome   ||
+                d.lo                 ||
+                d.learning_outcomes  ||
+                d.lo_tag             ||
+                d.lo_code            ||
+                d.lo_tags            ||
+                d.outcome            ||
+                d.clo                ||
+                d.clo_tag            ||
+                (Array.isArray(d.loTags) ? d.loTags[0] : d.loTags) ||
+                existingQuestion?.loTags?.[0] ||
+                '';
+
+            const loNorm = loRaw
+                ? String(loRaw).trim().replace(/^(LO|CLO)(\d)/i, '$1 $2').toUpperCase()
+                : '';
+            const cognitiveLevel =
+                d.cognitive_level    ||
+                d.cognitiveLevel     ||
+                d.cognitive_tag      ||
+                d.cognitiveTag       ||
+                d.bloom_level        ||
+                d.bloom              ||
+                d.bloom_taxonomy     ||
+                d.taxonomy_level     ||
+                d.taxonomy           ||
+                d.level              ||
+                existingQuestion?.cognitiveLevel ||
+                existingQuestion?.cognitiveTag   ||
+                '';
 
             const payload = {
                 id: Number(d.id),
@@ -125,8 +155,7 @@ export const useTestStore = defineStore('tests', {
                 course: existingQuestion?.course || d.course || '',
                 type: typeLabel,
                 loTags: loNorm ? [loNorm] : (existingQuestion?.loTags || []),
-                cognitiveLevel: d.cognitive_level || d.cognitiveLevel
-                    || existingQuestion?.cognitiveLevel || 'Remembering',
+                cognitiveLevel,
                 options,
                 pairs
             };
@@ -252,8 +281,34 @@ export const useTestStore = defineStore('tests', {
                         answer,
                         matching_pairs,
                         pairs: matching_pairs,
-                        cognitive_level: q.cognitive_level || item.cognitive_level || '',
-                        learning_outcome: q.learning_outcome || item.learning_outcome || '',
+
+                        // cognitive level — try every known field name
+                        cognitive_level:
+                            q.cognitive_level   || item.cognitive_level   ||
+                            q.cognitiveLevel    || item.cognitiveLevel    ||
+                            q.cognitive_tag     || item.cognitive_tag     ||
+                            q.cognitiveTag      || item.cognitiveTag      ||
+                            q.bloom_level       || item.bloom_level       ||
+                            q.bloom             || item.bloom             ||
+                            q.bloom_taxonomy    || item.bloom_taxonomy    ||
+                            q.taxonomy_level    || item.taxonomy_level    ||
+                            q.taxonomy          || item.taxonomy          ||
+                            q.level             || item.level             ||
+                            '',
+
+                        // learning outcome — try every known field name
+                        learning_outcome:
+                            q.learning_outcome  || item.learning_outcome  ||
+                            q.lo                || item.lo                ||
+                            q.learning_outcomes || item.learning_outcomes ||
+                            q.lo_tag            || item.lo_tag            ||
+                            q.lo_code           || item.lo_code           ||
+                            q.lo_tags           || item.lo_tags           ||
+                            q.outcome           || item.outcome           ||
+                            q.clo               || item.clo               ||
+                            q.clo_tag           || item.clo_tag           ||
+                            '',
+
                         correct_option_index: q.correct_option_index ?? item.correct_option_index ?? null,
                         answer_index: q.answer_index ?? item.answer_index ?? null,
                         answerIndex: q.answerIndex ?? item.answerIndex ?? null,
@@ -267,6 +322,13 @@ export const useTestStore = defineStore('tests', {
                     console.warn('[ensureTestReady] no valid questions built for exam', eid);
                     return this.pilotTests.find(t => Number(t.id) === eid) ?? null;
                 }
+
+                // ── FIX: diagnostic log — remove after confirming TOS works ────
+                console.log('[ensureTestReady] sample questions for TOS debug:', questions.slice(0, 5).map(q => ({
+                    id: q.id,
+                    loTags: q.loTags,
+                    cognitiveLevel: q.cognitiveLevel
+                })));
 
                 questions.forEach(q => {
                     const idx = questionStore.questions.findIndex(x => Number(x.id) === Number(q.id));
@@ -309,7 +371,12 @@ export const useTestStore = defineStore('tests', {
             const sid = Number(studentId);
             if (!sid) return;
             try {
-                const params = { student_id: sid, studentId: sid, userId: sid };
+                const params = { 
+                    student_id: sid, 
+                    studentId: sid, 
+                    userId: sid,
+                    faculty_id: sid // Include faculty_id so assigned faculty can fetch their tests
+                };
                 const r = await api.get('/student-exam-assignments', { params });
                 const list = Array.isArray(r?.data?.data) ? r.data.data
                     : (Array.isArray(r?.data) ? r.data : []);
@@ -626,24 +693,12 @@ export const useTestStore = defineStore('tests', {
             }
         },
 
-        // ── PATCHED ────────────────────────────────────────────────────────────
-        // Previously: completeExamAction(assignmentId, score)
-        //   Only sent { score } — so the results page always showed
-        //   "Time Spent: —" because the server never received per-question times.
-        //
-        // Now: completeExamAction(assignmentId, score, questionTimes, durationSeconds)
-        //   Sends question_times  { [questionId]: totalSeconds }
-        //   and  duration_seconds (total exam seconds elapsed).
-        //
-        // Called from TakeTest.vue handleSubmitTest:
-        //   await testStore.completeExamAction(aid, percent, questionTimes, spent);
-        // ──────────────────────────────────────────────────────────────────────
         async completeExamAction(assignmentId, score, questionTimes = {}, durationSeconds = 0) {
             try {
                 await api.patch(`/student-exam-assignments/${assignmentId}/complete`, {
                     score,
-                    question_times:   questionTimes,   // { [questionId]: totalSeconds }
-                    duration_seconds: durationSeconds, // total seconds spent on the exam
+                    question_times:   questionTimes,
+                    duration_seconds: durationSeconds,
                 });
             } catch (e) {
                 console.error('Error completing exam on server:', e);
@@ -695,8 +750,6 @@ export const useTestStore = defineStore('tests', {
             this.currentTest = null;
             this.reviewMode = false;
         },
-
-
 
         async fetchReportsData() {
             try {
@@ -885,6 +938,28 @@ export const useTestStore = defineStore('tests', {
             } catch (e) {
                 console.error('Failed to fetch student performance report:', e);
             }
+        },
+
+        async ensureQuestionsLoadedByIds(questionIds = []) {
+            if (!questionIds?.length) return;
+            const questionStore = useQuestionStore();
+            const missingIds = questionIds.filter(id => !questionStore.questions.find(q => Number(q.id) === Number(id)));
+            if (!missingIds.length) return;
+
+            console.log(`[ensureQuestionsLoadedByIds] ${missingIds.length} questions missing from store.`);
+
+            await Promise.allSettled(missingIds.map(async id => {
+                try {
+                    const r = await api.get(`/questions/${id}`);
+                    const q = r?.data?.data || r?.data;
+                    if (q) {
+                        const payload = this._buildQuestionPayload(q);
+                        questionStore.addQuestion(payload);
+                    }
+                } catch (e) {
+                    console.warn(`Failed to fetch question ${id}:`, e);
+                }
+            }));
         },
 
         async fetchAssignmentResult(assignmentId) {

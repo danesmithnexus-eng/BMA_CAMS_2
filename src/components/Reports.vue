@@ -217,33 +217,69 @@ export default {
             }).filter(Boolean);
         },
 
+        // ── FIX: tableOfSpecs now has robust fallback logic ────────────────────
         tableOfSpecs() {
             const { cognitiveLevels } = this;
             const reportQuestionIds = (this.selectedReport?.questionIds || []).map(Number);
 
+            // Primary: use questions from the store that match the report's question IDs
+            // and have the metadata needed for TOS
             let questions = [];
+
             if (reportQuestionIds.length) {
-                questions = reportQuestionIds.map(id => this.questions.find(q => Number(q.id) === id)).filter(Boolean);
+                questions = reportQuestionIds
+                    .map(id => this.questions.find(q => Number(q.id) === id))
+                    .filter(q => q && !q.virtual);
             }
+
+            // Fallback 1: if no store questions found by ID, use selectedQuestionsForPreview
             if (!questions.length) {
                 questions = this.selectedQuestionsForPreview.filter(q => !q.virtual);
             }
 
-            const loSet = new Set(questions.map(q => this.normalizeLO(q.loTags)).filter(Boolean));
+            // Fallback 2: use ALL store questions that belong to any exam ID matching
+            // the current report, in case questionIds wasn't populated on the report
+            if (!questions.length && this.selectedReport?.id) {
+                const examId = Number(this.selectedReport.id);
+                const pilotTest = this.pilotTests.find(t => Number(t.id) === examId);
+                const fallbackIds = (pilotTest?.questionIds || []).map(Number);
+                if (fallbackIds.length) {
+                    questions = fallbackIds
+                        .map(id => this.questions.find(q => Number(q.id) === id))
+                        .filter(q => q && !q.virtual);
+                }
+            }
+
+            // Debug: log how many questions have the required metadata
+            const withLO  = questions.filter(q => q.loTags?.length).length;
+            const withCog = questions.filter(q => q.cognitiveLevel || q.cognitiveTag).length;
+            if (questions.length) {
+                console.log(`[tableOfSpecs] ${questions.length} questions — ${withLO} have loTags, ${withCog} have cognitiveLevel`);
+            }
+
+            const loSet = new Set(
+                questions.map(q => this.normalizeLO(q.loTags)).filter(Boolean)
+            );
             const loTags = [...loSet].sort();
-            const summary = Object.fromEntries(loTags.map(lo => [lo, Object.fromEntries(cognitiveLevels.map(l => [l, 0]))]));
+            const summary = Object.fromEntries(
+                loTags.map(lo => [lo, Object.fromEntries(cognitiveLevels.map(l => [l, 0]))])
+            );
             const rowTotals = Object.fromEntries(loTags.map(lo => [lo, 0]));
             const colTotals = Object.fromEntries(cognitiveLevels.map(l => [l, 0]));
 
             questions.forEach(q => {
                 const lo = this.normalizeLO(q.loTags);
-                const level = q.cognitiveLevel || q.cognitiveTag || '';
-                if (lo && summary[lo]?.[level] !== undefined) {
-                    summary[lo][level]++;
+                // ── FIX: also check cognitiveTag as fallback ───────────────────
+                const qLevel = (q.cognitiveLevel || q.cognitiveTag || '').trim().toLowerCase();
+                const matchingLevel = cognitiveLevels.find(l => l.toLowerCase() === qLevel);
+
+                if (lo && matchingLevel && summary[lo]?.[matchingLevel] !== undefined) {
+                    summary[lo][matchingLevel]++;
                     rowTotals[lo]++;
-                    colTotals[level]++;
+                    colTotals[matchingLevel]++;
                 }
             });
+
             return { summary, rowTotals, colTotals, loTags, cognitiveLevels };
         },
 
@@ -319,6 +355,7 @@ export default {
             'ensureTestReady', 'fetchStudentPerformanceReport', 'ensureQuestionsLoadedByIds'
         ]),
         ...mapActions(useUserStore, ['fetchUsers']),
+        ...mapActions(useQuestionStore, ['fetchQuestions']),
         ...mapActions(useUIStore, ['showToast']),
 
         setView(name) { this.$router.push({ name }); },
@@ -335,11 +372,21 @@ export default {
             }
         },
 
+        // ── FIX: normalizeLO now handles both string and array loTags ──────────
         normalizeLO(loTags) {
             if (!loTags) return null;
-            const raw = Array.isArray(loTags) ? loTags[0] || '' : String(loTags);
+            const raw = Array.isArray(loTags)
+                ? (loTags[0] || '')
+                : String(loTags);
+            if (!raw.trim()) return null;
+            // Match LO/CLO followed by optional space/dash and digits
             const m = raw.match(/^(?:CLO|LO)[- ]?\d+/i);
-            return m ? m[0].toUpperCase().replace(/^CLO/, 'LO').replace(/\s+/, ' ') : raw || null;
+            if (m) {
+                return m[0].toUpperCase()
+                    .replace(/^CLO/, 'LO')
+                    .replace(/([A-Z]+)(\d)/, '$1 $2');  // ensure space before number
+            }
+            return raw.trim() || null;
         },
 
         formatDuration(seconds) {
@@ -392,13 +439,11 @@ export default {
                 answersMap[qid]         = entry;
                 answersMap[String(qid)] = entry;
 
-                // Capture server-side time_spent per answer if the backend stores it
                 if (a.time_spent !== undefined && a.time_spent !== null) {
                     questionTimes[qid] = Number(a.time_spent);
                 }
             }
 
-            // Fill in question_text from store for any missing entries
             for (const [key, entry] of Object.entries(answersMap)) {
                 if (!entry.question_text && !isNaN(Number(key))) {
                     const q = this.questions.find(x => Number(x.id) === Number(key));
@@ -420,12 +465,6 @@ export default {
             };
         },
 
-        /**
-         * Merge per-question times from testStore.studentTests into the parsed
-         * questionTimes map. The store entry was written by TakeTest.vue using
-         * start/end timestamps, so it reflects real time-on-question including
-         * all revisits. Server values take precedence only when non-zero.
-         */
         _mergeLocalQuestionTimes(questionTimes, assignmentId, testId, studentId) {
             const testStore = useTestStore();
 
@@ -439,7 +478,6 @@ export default {
             const merged = { ...questionTimes };
             for (const [qid, localSecs] of Object.entries(st.questionTimes)) {
                 const key = Number(qid);
-                // Use local value when server didn't return one or returned 0
                 if (!merged[key] || merged[key] === 0) {
                     merged[key] = localSecs;
                 }
@@ -619,9 +657,6 @@ export default {
                                 }
                             });
 
-                            // Merge locally-tracked question times (start/end timestamp approach)
-                            // into the server response — this is the source of truth for the
-                            // "Time Spent" badge shown per question in StudentResultReview
                             const mergedQuestionTimes = this._mergeLocalQuestionTimes(
                                 parsed.questionTimes,
                                 result.assignmentId,
@@ -642,7 +677,6 @@ export default {
                                 durationSeconds: parsed.durationSeconds,
                                 completedAt:     parsed.completedAt,
                                 answers:         parsed.answers,
-                                // questionTimes is what StudentResultReview.getQuestionTime() reads
                                 questionTimes:   mergedQuestionTimes,
                             };
 
@@ -724,6 +758,7 @@ export default {
 
     async mounted() {
         this.fetchUsers().catch(() => {});
+        this.fetchQuestions().catch(() => {});
         if (this.$route?.query?.back) this.returnView = String(this.$route.query.back);
 
         if (this.currentView === 'reportDetail' && this.selectedReport) {
@@ -900,9 +935,16 @@ export default {
                         <div class="bg-primary bg-opacity-10 p-2 rounded-2 me-3"><i class="fas fa-th-list text-primary"></i></div>
                         <h5 class="fw-bold mb-0">Table of Specifications (LO × Cognitive Level)</h5>
                     </div>
+
+                    <!-- ── FIX: improved empty-state message with debug info ── -->
                     <div v-if="!tableOfSpecs.loTags.length" class="text-muted small mb-4 p-5 text-center border rounded-3 bg-light">
-                        No LO/cognitive level data available for this exam.
+                        <i class="fas fa-table fa-2x mb-3 opacity-25 d-block"></i>
+                        <div class="fw-semibold mb-1">No LO/cognitive level data available for this exam.</div>
+                        <div class="text-muted" style="font-size:0.8rem">
+                            Questions must have Learning Outcome tags and Cognitive Level assigned to populate this table.
+                        </div>
                     </div>
+
                     <div v-else class="table-responsive mb-5">
                         <table class="table table-bordered align-middle text-center mb-0">
                             <thead class="table-light">

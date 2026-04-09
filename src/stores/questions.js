@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import api from '../services/api';
 
 export const useQuestionStore = defineStore('questions', {
     state: () => ({
@@ -49,6 +50,33 @@ export const useQuestionStore = defineStore('questions', {
         })
     },
     actions: {
+        async fetchQuestions() {
+            try {
+                const { data } = await api.get('/questions');
+                const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+                
+                // Clear and repopulate store with normalized questions
+                this.questions = [];
+                list.forEach(group => {
+                    (group.questions || []).forEach(q => {
+                        const loRaw = q.learning_outcome || '';
+                        const loNorm = loRaw ? loRaw.replace(/^(LO)(\d)/i, '$1 $2') : '';
+                        
+                        this.addQuestion({
+                            id: q.id,
+                            text: q.text || '',
+                            status: q.status || 'Draft',
+                            type: q.question_type || '',
+                            loTags: loNorm ? [loNorm] : [],
+                            cognitiveLevel: q.cognitive_level || 'Remembering'
+                        });
+                    });
+                });
+            } catch (err) {
+                console.error('Failed to fetch questions in store:', err);
+                throw err;
+            }
+        },
         addQuestion(question) {
             if (!question.id) question.id = Date.now();
             this.questions.push(question);

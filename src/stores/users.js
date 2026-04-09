@@ -10,8 +10,7 @@ export const useUserStore = defineStore('users', {
         async fetchUsers() {
             try {
                 const response = await api.get('/users');
-                console.log('Fetched users:', response.data); // Debug log
-                // Handle Laravel pagination/data wrapper if present
+
                 this.users = response.data?.data || response.data || [];
             } catch (error) {
                 console.error('Error fetching users:', error);

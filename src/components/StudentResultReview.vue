@@ -83,17 +83,17 @@ export default {
                     ans = answers[id] || answers[String(id)];
                 }
 
-                if (ans && (ans.question_text || ans.text)) {
-                    return {
-                        id,
-                        text: ans.question_text || ans.text,
-                        type: 'Identification',
-                        virtual: true,
-                        answer: ans.answer_value || ans.answer || ''
-                    };
-                }
+                // if (ans && (ans.question_text || ans.text)) {
+                //     return {
+                //         id,
+                //         text: ans.question_text || ans.text,
+                //         type: 'Identification',
+                //         virtual: true,
+                //         answer: ans.answer_value || ans.answer || ''
+                //     };
+                // }
 
-                return { id, text: `Question #${id}`, type: 'Identification', virtual: true, answer: '' };
+                // return { id, text: `Question #${id}`, type: 'Identification', virtual: true, answer: '' };
             }).filter(Boolean);
         },
     },
@@ -292,7 +292,7 @@ export default {
             if (c && s) return 'bg-success-subtle border-success text-success-emphasis fw-semibold';
             if (c)      return 'bg-success-subtle border-success text-success-emphasis fw-semibold';
             if (s)      return 'bg-danger-subtle border-danger text-danger-emphasis fw-semibold';
-            return 'bg-light text-muted opacity-75';
+            return 'bg-light'; // Changed from 'bg-light text-muted opacity-75'
         },
 
         getCorrectTf(question) {
@@ -387,45 +387,48 @@ export default {
         </div>
 
         <div class="card border-0 shadow-sm rounded-4">
-            <div class="card-header bg-white border-bottom p-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
-                <div>
-                    <h5 class="mb-1 fw-bold">
-                        {{ report?.name || studentResult?.name || 'Test Paper' }}
-                    </h5>
-                    <p class="text-muted mb-2">
-                        <i class="fas fa-user me-1"></i>
-                        {{ getStudentName(studentResult?.studentId, studentResult) }}
-                    </p>
-                    <div class="d-flex flex-wrap gap-3">
-                        <span>
-                            <i class="fas fa-star me-1 text-warning"></i>Score:
-                            <strong class="badge fs-6" :class="getScoreBadgeClass(studentResult?.score)">
-                                {{ studentResult?.score ?? '—' }}%
-                            </strong>
-                        </span>
-                        <span class="text-muted small">
-                            <i class="fas fa-check me-1 text-success"></i>
-                            {{ studentResult?.rawScore ?? '?' }} / {{ studentResult?.totalQuestions ?? '?' }} correct
-                        </span>
-                        <span class="text-muted small">
-                            <i class="fas fa-clock me-1"></i>
-                            Total: {{ resolvedDuration > 0 ? formatDuration(resolvedDuration) : '—' }}
-                        </span>
-                        <span v-if="selectedQuestionsForPreview.length > 0" class="text-muted small">
-                            <i class="fas fa-chart-line me-1"></i>
-                            Avg/Q: {{ formatDuration(resolvedDuration / selectedQuestionsForPreview.length) }}
-                        </span>
-                        <span class="text-muted small">
-                            <i class="fas fa-calendar me-1"></i>
-                            {{ studentResult?.completedAt
-                                ? new Date(studentResult.completedAt).toLocaleString()
-                                : '—' }}
-                        </span>
-                    </div>
+            <div class="card-header bg-white border-bottom p-4">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h5 class="fw-bold mb-0">{{ report?.name || studentResult?.name || 'Test Paper' }}</h5>
+                    <button class="btn btn-outline-secondary btn-sm" @click="handleBack">
+                        <i class="fas fa-arrow-left me-1"></i> Back
+                    </button>
                 </div>
-                <button class="btn btn-outline-secondary" @click="handleBack">
-                    <i class="fas fa-arrow-left me-1"></i> Back
-                </button>
+                
+                <p class="text-muted mb-2">
+                    <i class="fas fa-user me-1"></i>
+                    {{ getStudentName(studentResult?.studentId, studentResult) }}
+                </p>
+
+                <div class="d-flex flex-wrap gap-3 align-items-center">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-star me-2 text-warning"></i>
+                        <span class="me-2 text-muted small">Score:</span>
+                        <strong class="badge fs-6" :class="getScoreBadgeClass(studentResult?.score)">
+                            {{ studentResult?.score ?? '—' }}%
+                        </strong>
+                    </div>
+                    
+                    <span class="text-muted small">
+                        <i class="fas fa-check me-1 text-success"></i>
+                        {{ studentResult?.rawScore ?? '?' }} / {{ studentResult?.totalQuestions ?? '?' }} correct
+                    </span>
+                    
+                    <span class="text-muted small">
+                        <i class="fas fa-clock me-1 text-muted"></i>
+                        Total: {{ resolvedDuration > 0 ? formatDuration(resolvedDuration) : '—' }}
+                    </span>
+                    
+                    <span v-if="selectedQuestionsForPreview.length > 0" class="text-muted small">
+                        <i class="fas fa-chart-line me-1 text-muted"></i>
+                        Avg/Q: {{ formatDuration(resolvedDuration / selectedQuestionsForPreview.length) }}
+                    </span>
+                    
+                    <span class="text-muted small">
+                        <i class="fas fa-calendar me-1 text-muted"></i>
+                        {{ studentResult?.completedAt ? new Date(studentResult.completedAt).toLocaleString() : '—' }}
+                    </span>
+                </div>
             </div>
 
             <div class="card-body p-4" style="max-height:75vh;overflow-y:auto">
@@ -508,29 +511,31 @@ export default {
                         </div>
 
                         <!-- Identification -->
-                        <div v-else-if="q.type === 'Identification'" class="row g-3">
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border bg-success-subtle border-success">
-                                    <small class="d-block mb-1 fw-semibold text-success">
+                        <div v-else-if="q.type === 'Identification'">
+                            <div class="p-2 mb-2 rounded border bg-success-subtle border-success">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-check-circle me-2 text-success"></i>
+                                        <span>{{ getCorrectId(q) || '—' }}</span>
+                                    </div>
+                                    <span class="badge bg-success shadow-sm">
                                         <i class="fas fa-check-circle me-1"></i>Correct Answer
-                                    </small>
-                                    <span class="fw-bold fs-6 text-success">
-                                        {{ getCorrectId(q) || '—' }}
                                     </span>
                                 </div>
                             </div>
-                            <div class="col-md-6">
-                                <div class="p-3 rounded border"
-                                    :class="isCorrect(q, studentResult) ? 'bg-success-subtle border-success' : 'bg-danger-subtle border-danger'">
-                                    <small class="d-block mb-1 fw-semibold"
-                                        :class="isCorrect(q, studentResult) ? 'text-success' : 'text-danger'">
+                            <div class="p-2 mb-2 rounded border"
+                                :class="isCorrect(q, studentResult) ? 'bg-primary-subtle border-primary' : 'bg-danger-subtle border-danger'">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas me-2"
+                                            :class="isCorrect(q, studentResult) ? 'fa-user-check text-primary' : 'fa-user-times text-danger'"></i>
+                                        <span>{{ getStudentAnswerValue(q, studentResult) || 'No Answer' }}</span>
+                                    </div>
+                                    <span class="badge shadow-sm"
+                                        :class="isCorrect(q, studentResult) ? 'bg-primary' : 'bg-danger'">
                                         <i class="fas me-1"
-                                            :class="isCorrect(q, studentResult) ? 'fa-check-circle' : 'fa-times-circle'"></i>
+                                            :class="isCorrect(q, studentResult) ? 'fa-user-check' : 'fa-user-times'"></i>
                                         Your Answer
-                                    </small>
-                                    <span class="fw-bold fs-6"
-                                        :class="isCorrect(q, studentResult) ? 'text-success' : 'text-danger'">
-                                        {{ getStudentAnswerValue(q, studentResult) || 'No Answer' }}
                                     </span>
                                 </div>
                             </div>

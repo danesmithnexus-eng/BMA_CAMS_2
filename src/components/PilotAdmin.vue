@@ -343,14 +343,20 @@ export default {
                 })
                 .map(u => {
                     const userRole = (u.role || u.roles || '').toString().toLowerCase();
-                    const assignmentId = userRole.includes('faculty')
+                    const isFaculty = userRole.includes('faculty');
+                    
+                    // Faculty use their top-level id; students use student_id / student.id
+                    // IMPORTANT: The backend 'sync' endpoint expects student_id to be valid for the role.
+                    const assignmentId = isFaculty
                         ? Number(u.id)
                         : Number(u.student?.id || u.student_id || 0);
+
                     return {
                         ...u,
                         assignmentId,
+                        isFaculty, // Add explicit flag
                         displayName: u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim(),
-                        displayRole: userRole.includes('faculty') ? 'Faculty' : 'Student'
+                        displayRole: isFaculty ? 'Faculty' : 'Student'
                     };
                 })
                 .filter(u => u.assignmentId > 0)
@@ -812,39 +818,38 @@ export default {
                     .filter(s => Number.isInteger(s.assignmentId) && s.assignmentId > 0)
                     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-                if (mapped.length === 0 && Array.isArray(this.users) && this.users.length > 0) {
-                    // ── FIXED: fallback also includes faculty users ──
-                    const fallback = this.users
-                        .filter(u => {
-                            const role = (u.role || u.roles || '').toString().toLowerCase();
-                            return role.includes('student') || role.includes('faculty');
-                        })
-                        .map(u => {
-                            const role = (u.role || u.roles || '').toString().toLowerCase();
-                            const isFaculty = role.includes('faculty');
-                            const sid = isFaculty
-                                ? Number(u.id)
-                                : Number(u?.student?.id || u?.student_id || 0);
-                            const name = u.fullname || u.name || `${u.fname || ''} ${u.lname || ''}`.trim();
-                            const assigned = this.studentTests.some(
-                                st => Number(st.testId) === Number(test.id) && Number(st.studentId) === sid
-                            );
-                            return {
-                                assignmentId: sid,
-                                displayName: name || `${isFaculty ? 'Faculty' : 'Student'} #${sid}`,
-                                role: isFaculty ? 'Faculty' : 'Student',
-                                is_assigned: assigned
-                            };
-                        })
-                        .filter(s => Number.isInteger(s.assignmentId) && s.assignmentId > 0)
-                        .sort((a, b) => a.displayName.localeCompare(b.displayName));
-                    this.assignableStudents = fallback;
-                    this.studentsToAssign = fallback.filter(s => s.is_assigned).map(s => Number(s.assignmentId));
-                } else {
-                    this.assignableStudents = mapped;
-                    this.studentsToAssign = mapped.filter(s => s.is_assigned).map(s => Number(s.assignmentId));
+                // ── FIXED: Always use availableStudents as the base to ensure all potential users (including faculty) are shown ──
+                const assignedIds = new Set(mapped.filter(s => s.is_assigned).map(s => Number(s.assignmentId)));
+
+                // If the API returned nothing, check local store for existing assignments
+                if (assignedIds.size === 0) {
+                    this.studentTests
+                        .filter(st => Number(st.testId) === Number(test.id))
+                        .forEach(st => assignedIds.add(Number(st.studentId)));
                 }
-                this.participantsCounts[test.id] = (this.assignableStudents).filter(s => s.is_assigned).length;
+
+                const allPossible = this.availableStudents.map(u => ({
+                    assignmentId: Number(u.assignmentId),
+                    displayName: u.displayName,
+                    role: u.displayRole,
+                    isFaculty: !!u.isFaculty, // Preserve faculty flag
+                    is_assigned: assignedIds.has(Number(u.assignmentId))
+                }));
+
+                // In case some users are in 'mapped' but not in 'availableStudents' (e.g. from server)
+                const alreadyIncluded = new Set(allPossible.map(s => s.assignmentId));
+                mapped.forEach(m => {
+                    if (!alreadyIncluded.has(m.assignmentId)) {
+                        allPossible.push({ 
+                            ...m,
+                            isFaculty: (m.role || '').toLowerCase().includes('faculty')
+                        });
+                    }
+                });
+
+                this.assignableStudents = allPossible.sort((a, b) => a.displayName.localeCompare(b.displayName));
+                this.studentsToAssign = this.assignableStudents.filter(s => s.is_assigned).map(s => Number(s.assignmentId));
+                this.participantsCounts[test.id] = this.studentsToAssign.length;
             } catch (e) {
                 this.assignableStudents = [];
                 this.studentsToAssign = [];
@@ -864,9 +869,19 @@ export default {
                 return;
             }
 
-            const ids = Array.isArray(this.studentsToAssign)
-                ? [...new Set(this.studentsToAssign.map(Number))]
-                : [];
+            // Map each studentId back to its user role to check for faculty
+            const selectedWithRoles = this.studentsToAssign.map(id => {
+                const user = this.assignableStudents.find(s => Number(s.assignmentId) === Number(id));
+                return {
+                    id: Number(id),
+                    isFaculty: user?.isFaculty || (user?.role || '').toLowerCase().includes('faculty')
+                };
+            });
+
+            const ids = selectedWithRoles.map(u => u.id);
+            // Separate student IDs and faculty IDs for the sync body
+            const studentIds = selectedWithRoles.filter(u => !u.isFaculty).map(u => u.id);
+            const facultyIds = selectedWithRoles.filter(u => u.isFaculty).map(u => u.id);
 
             const prevIds = Array.isArray(this.assignableStudents)
                 ? this.assignableStudents.filter(s => s.is_assigned).map(s => Number(s.assignmentId))
@@ -883,7 +898,8 @@ export default {
 
             const body = {
                 exam_id: Number(this.selectedTest.id),
-                student_id: ids,
+                student_id: studentIds, // Normal students
+                faculty_id: facultyIds, // Explicitly pass faculty IDs
             };
 
             (async () => {

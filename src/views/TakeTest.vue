@@ -52,20 +52,16 @@ const submitting = ref(false);
 const isOffline = ref(false);
 const loading = ref(true);
 const reviewMode = ref(false);
-const questionAnswers = ref([]); // Temporary storage for question answers
-
+const questionAnswers = ref([]);
 
 const isRestoredSession = ref(false);
 
 let timerInterval = null;
 
-
-const questionStartTime = ref(null);   // ms timestamp when current question was entered
-const questionTimeMap = ref({});       // { [questionId]: { startTime, endTime, totalSeconds } } local accumulator
-
+const questionStartTime = ref(null);
+const questionTimeMap = ref({});
 
 const stopQuestionClock = () => {
-
     if (reviewMode.value) return;
 
     const q = session.currentQuestion;
@@ -75,7 +71,6 @@ const stopQuestionClock = () => {
     const elapsed = Math.round((endTime - questionStartTime.value) / 1000);
     const qid = q.id;
 
-    // Accumulate — revisits add on top of previous total
     const prevData = questionTimeMap.value[qid] || { totalSeconds: 0 };
     const newData = {
         startTime: questionStartTime.value,
@@ -84,10 +79,7 @@ const stopQuestionClock = () => {
     };
 
     questionTimeMap.value[qid] = newData;
-
-
     session.questionTimes[qid] = newData;
-
 
     try {
         const key = `qt_${session.assignmentId}`;
@@ -97,31 +89,25 @@ const stopQuestionClock = () => {
     questionStartTime.value = null;
 };
 
-
 const startQuestionClock = () => {
     const q = session.currentQuestion;
     if (!q) return;
     questionStartTime.value = Date.now();
 };
 
-
 const restoreSessionData = () => {
     if (!session.assignmentId) return;
 
     try {
-
         const qtKey = `qt_${session.assignmentId}`;
         const savedQt = localStorage.getItem(qtKey);
         if (savedQt) {
             const parsed = JSON.parse(savedQt);
-
             questionTimeMap.value = { ...parsed };
-    
             Object.assign(session.questionTimes, parsed);
             console.log('[TakeTest] Restored questionTimes from localStorage:', parsed);
         }
 
-        // ── 2. Restore answer history & auto-fill session.answers ─────────────
         const qaKey = `qa_${session.assignmentId}`;
         const savedQa = localStorage.getItem(qaKey);
         if (savedQa) {
@@ -130,10 +116,8 @@ const restoreSessionData = () => {
 
             if (history.length > 0) {
                 const last = history[history.length - 1];
-                // answer_id stores the full answers snapshot: { [questionId]: value }
                 const restoredAnswers = last.answer_id || last.answers || {};
 
- 
                 Object.entries(restoredAnswers).forEach(([qid, val]) => {
                     if (val !== undefined && val !== null) {
                         session.answers[Number(qid)] = val;
@@ -147,30 +131,28 @@ const restoreSessionData = () => {
         console.warn('[TakeTest] restoreSessionData error:', e);
     }
 
-    // Mark session as restored so onAnswer knows not to re-record existing answers
     isRestoredSession.value = true;
 };
 
 /**
- * Remove the localStorage backup entries after a successful submit.
+ * FIX: Only remove the qa_ backup on submit.
+ * The qt_ key is intentionally kept so the Reports review page can read
+ * question times after submission. It is cleaned up inside openStudentResult()
+ * in Reports.vue once the data has been successfully read and merged.
  */
 const clearSessionStorage = () => {
     if (!session.assignmentId) return;
     try {
-        localStorage.removeItem(`qt_${session.assignmentId}`);
         localStorage.removeItem(`qa_${session.assignmentId}`);
+        // qt_ is kept alive for the post-submit review page in Reports.vue
     } catch (_) {}
 };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const getStudentId = () =>
     Number(authStore.user?.student?.id ?? authStore.user?.student_id ?? authStore.user?.id ?? 0);
 
 const goBack = () =>
     router.push({ name: authStore.user?.role === 'Student' ? 'studentDashboard' : 'dashboard' });
-
-// ── Timer ─────────────────────────────────────────────────────────────────────
 
 const startTimer = () => {
     stopTimer();
@@ -187,8 +169,6 @@ const stopTimer = () => {
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 };
 
-// ── Exam summary (for review screen) ─────────────────────────────────────────
-
 const examSummary = computed(() => {
     const empty = { total: 0, answered: 0, missed: 0, questions: [] };
     if (!session.questions.length) return empty;
@@ -196,7 +176,6 @@ const examSummary = computed(() => {
     const questions = session.questions.map(q => {
         if (!q) return null;
         const answer = session.answers[q.id];
-        // Fetch from session.questionTimes which is kept in sync by stopQuestionClock()
         const timeData = session.questionTimes[q.id];
         const timeSpent = typeof timeData === 'object' ? (timeData.totalSeconds || 0) : (timeData || 0);
         const isAnswered = answer !== undefined && answer !== null && answer !== '';
@@ -211,14 +190,11 @@ const examSummary = computed(() => {
     return { total: questions.length, answered, missed: questions.length - answered, questions };
 });
 
-// ── Answer handling ───────────────────────────────────────────────────────────
-
 const onAnswer = (val) => {
     const q = session.currentQuestion;
     if (!q) return;
 
     if (isRestoredSession.value) {
- 
         isRestoredSession.value = false;
     }
 
@@ -234,7 +210,6 @@ const onBlur = async () => {
     if (!q) return;
     const val = session.answers[q.id];
     if (val === undefined || val === null || val === '') return;
-    // Offline: persist to local DB for later sync
     if (isOffline.value && session.assignmentId) {
         const answerText = q.type === 'Multiple Choice'
             ? (q.options?.[val]?.text ?? String(val))
@@ -242,21 +217,19 @@ const onBlur = async () => {
         await saveOfflineAnswer(session.assignmentId, q.id, answerText).catch(() => {});
     }
 };
-// ── Navigation ────────────────────────────────────────────────────────────────
-const onPrev = () => {
 
+const onPrev = () => {
     stopQuestionClock();
     session.prev();
     startQuestionClock();
 };
 
 const onNext = async () => {
-
     stopQuestionClock();
 
     questionAnswers.value.push({
         question_id: session.assignmentId,
-        answer_id: { ...session.answers }, // full answers map for restoration
+        answer_id: { ...session.answers },
         questions: session.questions,
         questionTimes: { ...session.questionTimes },
     });
@@ -272,40 +245,32 @@ const onNext = async () => {
 };
 
 const enterReviewMode = () => {
-
     stopQuestionClock();
-
     questionStartTime.value = null;
     reviewMode.value = true;
 };
 
 const goToQuestion = (index) => {
-
     reviewMode.value = false;
     session.navigate(index);
     startQuestionClock();
 };
 
-// ── Submit ────────────────────────────────────────────────────────────────────
-
 const handleSubmitTest = async () => {
     if (!session.isActive) return;
     submitting.value = true;
     stopTimer();
-
     stopQuestionClock();
 
     const aid    = session.assignmentId;
     const sid    = session.studentId;
     const testId = session.examId;
 
-    // Snapshot AFTER stopQuestionClock() has written the final elapsed time
     const questionTimes = {};
     Object.entries(session.questionTimes).forEach(([qid, data]) => {
         questionTimes[qid] = typeof data === 'object' ? (data.totalSeconds || 0) : (data || 0);
     });
 
-    // 1. Flush ALL locally-stored answers + question times to the server
     try {
         await flushAllPending({
             assignmentId:  aid,
@@ -317,7 +282,6 @@ const handleSubmitTest = async () => {
         console.error('[TakeTest] Error flushing answers on submit:', e);
     }
 
-    // 2. Offline mode — mark locally and exit
     if (isOffline.value) {
         const stIdx = testStore.studentTests.findIndex(
             st => Number(st.testId) === testId && Number(st.studentId) === sid
@@ -339,7 +303,6 @@ const handleSubmitTest = async () => {
         return goBack();
     }
 
-    // 3. Score locally
     let score = 0;
     session.questions.forEach(q => {
         if (!q) return;
@@ -357,12 +320,10 @@ const handleSubmitTest = async () => {
     const total   = session.questions.length;
     const percent = total ? Math.round((score / total) * 100) : 0;
 
-    // 4. Total time spent (derived from countdown timer)
     const limitSec  = (session.timeLimit || 60) * 60;
     const remaining = session.remainingTime ?? 0;
     const spent     = Math.max(0, limitSec - remaining);
 
-    // 5. Update local store with questionTimes included
     const stIdx = testStore.studentTests.findIndex(
         st => Number(st.testId) === testId && Number(st.studentId) === sid
     );
@@ -397,8 +358,6 @@ const handleSubmitTest = async () => {
     goBack();
 };
 
-// ── Mount ─────────────────────────────────────────────────────────────────────
-
 onMounted(async () => {
     loading.value = true;
 
@@ -415,7 +374,6 @@ onMounted(async () => {
 
         const sid = getStudentId();
 
-        // ── Refresh scenario: session already active for this exam ──
         if (session.examId === examId && session.questions.length > 0) {
             console.log('[TakeTest] Restoring session from store (refresh)');
 
@@ -431,20 +389,16 @@ onMounted(async () => {
                 }
             });
 
-            // Re-warm the answer ID cache in case the page was hard-refreshed
             const restoreAid = session.assignmentId ?? urlAid ?? null;
             if (restoreAid && !isOffline.value) preloadAnswerIds(restoreAid).catch(() => {});
 
             restoreSessionData();
-
             startTimer();
-
             startQuestionClock();
             loading.value = false;
             return;
         }
 
-        // ── Fresh load ──
         console.log('[TakeTest] Fetching student assignments...');
         await testStore.fetchStudentAssignments(authStore.user.id);
 
@@ -479,7 +433,6 @@ onMounted(async () => {
             return;
         }
 
-        // Resolve question objects
         const { useQuestionStore } = await import('../stores/questions');
         const questionStore = useQuestionStore();
         const questions = (ensured.questionIds ?? [])
@@ -492,14 +445,17 @@ onMounted(async () => {
             return;
         }
 
-        // Resolve assignmentId
         let aid = urlAid || st.assignmentId || null;
 
         if (!aid && !isOffline.value) {
             console.log('[TakeTest] assignmentId missing — querying server...');
             try {
                 const r = await api.get('/student-exam-assignments', {
-                    params: { student_id: sid, exam_id: examId }
+                    params: { 
+                        student_id: sid, 
+                        faculty_id: sid, // Include faculty_id for assigned faculty users
+                        exam_id: examId 
+                    }
                 });
                 const list = Array.isArray(r?.data?.data) ? r.data.data
                     : (Array.isArray(r?.data) ? r.data : []);
@@ -548,9 +504,7 @@ onMounted(async () => {
         }
 
         restoreSessionData();
-
         startTimer();
-        // Begin timing question #0 immediately
         startQuestionClock();
 
     } catch (e) {
