@@ -265,6 +265,12 @@ export default {
                                 <p class="mb-0 fst-italic">{{ question.remarks }}</p>
                             </div>
 
+                            <!-- Show recommendations for approved questions -->
+                            <div v-if="formatStatus(question.status) === 'Approved' && (question.detected_level || question.reason)"
+                                 class="alert alert-info p-2 mt-3">
+                                <strong>Recommendations:</strong> {{ question.detected_level || '' }}<template v-if="question.detected_level && question.reason">, </template>{{ question.reason || '' }}
+                            </div>
+
                             <hr>
 
                             <!-- Answer Details -->

@@ -4,7 +4,7 @@ import { Network } from '@capacitor/network'
 import { enqueueRequest } from './db'
 
 const api = axios.create({
-    baseURL: 'http://192.168.68.101:8000/api',
+    baseURL: 'http://192.168.100.72:8000/api',
     headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'

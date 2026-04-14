@@ -656,13 +656,11 @@ export default {
             }
         },
 
-        // ─── fetchQuestionDetails: robust, never clears existing choices ──────
         async fetchQuestionDetails(questionId, courseGroup = null) {
             this.loadingChoices = true;
             try {
                 const res = await api.get(`/questions/${questionId}`);
 
-                // Discard result if the user has already opened a different question
                 if (this._editingQuestionId !== questionId) return;
 
                 const d = res?.data?.data || res?.data || {};
