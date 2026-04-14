@@ -217,13 +217,10 @@ export default {
             }).filter(Boolean);
         },
 
-        // ── FIX: tableOfSpecs now has robust fallback logic ────────────────────
         tableOfSpecs() {
             const { cognitiveLevels } = this;
             const reportQuestionIds = (this.selectedReport?.questionIds || []).map(Number);
 
-            // Primary: use questions from the store that match the report's question IDs
-            // and have the metadata needed for TOS
             let questions = [];
 
             if (reportQuestionIds.length) {
@@ -232,13 +229,10 @@ export default {
                     .filter(q => q && !q.virtual);
             }
 
-            // Fallback 1: if no store questions found by ID, use selectedQuestionsForPreview
             if (!questions.length) {
                 questions = this.selectedQuestionsForPreview.filter(q => !q.virtual);
             }
-
-            // Fallback 2: use ALL store questions that belong to any exam ID matching
-            // the current report, in case questionIds wasn't populated on the report
+ 
             if (!questions.length && this.selectedReport?.id) {
                 const examId = Number(this.selectedReport.id);
                 const pilotTest = this.pilotTests.find(t => Number(t.id) === examId);
@@ -322,7 +316,7 @@ export default {
                 const rec =
                     difficulty < 0.2  ? { text: 'Result (Too Hard)', class: 'bg-warning text-dark' }
                     : difficulty > 0.9 ? { text: 'Result (Too Easy)', class: 'bg-success' }
-                    : discrimination < 0.2 ? { text: 'Discard', class: 'bg-danger' }
+                    : discrimination < 0.2 ? { text: 'Revision', class: 'bg-danger' }
                     : { text: 'Retain', class: 'bg-success' };
 
                 return {

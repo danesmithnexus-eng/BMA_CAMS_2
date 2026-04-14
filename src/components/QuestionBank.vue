@@ -242,7 +242,7 @@
                             <div class="alert alert-info">
                                 <small>
                                     <i class="fas fa-info-circle me-2"></i>
-                                    CSV format: Program, Course, Type, LO Tag, Question Text, Option A, Option B, Option C, Option D, Correct Answer, Points, CO Level
+                                    CSV format: Program,Course,LO Tag,Type,Cognitive Level,Question Text,Points,Option A,Option B,Option C,Option D,Correct Answer
                                 </small>
                             </div>
                             <div v-if="uploadStatusMessage" class="mt-2 text-primary small">{{ uploadStatusMessage }}</div>
@@ -406,7 +406,7 @@ export default {
         allPrograms() { return ['Deck Operations', 'Navigation', 'Safety', 'ICT', 'MARLAW']; },
         allCourses() { return ['Seamanship I', 'COLREGs', 'Ship Construction', 'Firefighting', 'ICT', 'MARLAW']; },
         allTypes() { return ['Multiple Choice', 'True or False', 'Identification', 'Matching Type', 'Enumeration']; },
-        allStatuses() { return ['Draft', 'Pending Validation', 'Pending Approval', 'Approved', 'Rejected']; }
+        allStatuses() { return ['Draft', 'Pending Validation', 'Pending Approval', 'Approved', 'Rejected', 'Revised']; }
     },
     methods: {
         ...mapActions(useQuestionStore, ['addQuestion', 'updateQuestion', 'deleteQuestion', 'updateStatus', 'setFilters', 'resetFilters', 'batchUpdateStatus', 'clearAll']),
@@ -425,7 +425,8 @@ export default {
                     'draft': 'Draft', 'active': 'Approved', 'approved': 'Approved',
                     'pending_validation': 'Pending Validation', 'pending validation': 'Pending Validation',
                     'pending_approval': 'Pending Approval', 'pending approval': 'Pending Approval',
-                    'validated': 'Pending Approval', 'archived': 'Rejected', 'rejected': 'Rejected', 'invalid': 'Rejected'
+                    'validated': 'Pending Approval', 'archived': 'Rejected', 'rejected': 'Rejected', 'invalid': 'Rejected',
+                    'revised': 'Revised'
                 };
                 if (val === 'inactive') return this.isCollecting() ? 'Pending Validation' : 'Pending Approval';
                 return map[val] || (s || 'Draft');
@@ -438,6 +439,7 @@ export default {
             if (val === 'pending_validation' || val === 'pending validation') return 'Pending Validation';
             if (val === 'pending_approval' || val === 'pending approval' || val === 'validated') return 'Pending Approval';
             if (val === 'archived' || val === 'rejected' || val === 'invalid') return 'Rejected';
+            if (val === 'revised') return 'Revised';
             return 'Draft';
         },
 
@@ -699,7 +701,6 @@ export default {
                             }
                         }
                     }
-                    // If API returned nothing useful, keep the placeholder blank slots already shown
                 }
 
                 // ── True or False ───────────────────────────────────────────
@@ -750,9 +751,17 @@ export default {
             const questionTypeMap = { 'True or False': 1, 'Multiple Choice': 2, 'Matching Type': 3, 'Identification': 4, 'Enumeration': 5 };
             const cognitiveMap = { 'Remembering': 1, 'Understanding': 2, 'Applying': 3, 'Analyzing': 4, 'Evaluating': 5, 'Creating': 6 };
             const statusMap = { 'Draft': 'draft', 'Pending Validation': 'pending_validation', 'Pending Approval': 'pending_approval', 'Approved': 'active', 'Rejected': 'archived' };
+            
+            let targetStatus = statusMap[this.editingQuestion.status] || 'draft';
+            
+            // If editing an existing Approved question, change status to 'revised'
+            if (this.editingQuestion.id && this.editingQuestion.status === 'Approved') {
+                targetStatus = 'revised';
+            }
+
             const payload = {
                 text: this.editingQuestion.text,
-                status: statusMap[this.editingQuestion.status] || 'draft',
+                status: targetStatus,
                 remarks: this.editingQuestion.remarks || '',
                 question_type_id: questionTypeMap[typeName] || 2,
                 course_id: Number(this.editingQuestion.course_id) || null,

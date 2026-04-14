@@ -23,9 +23,6 @@ export const useUIStore = defineStore('ui', {
             
             this.toast.visible = true;
             
-            // Auto-hide handled by component or we can use setTimeout here if we manage visibility manually
-            // But Bootstrap Toast usually handles auto-hide if configured, or we trigger .show()
-            // We will let the component watch the state or use a subscription
         },
         hideToast() {
             this.toast.visible = false;

@@ -36,10 +36,7 @@ export const useExamSessionStore = defineStore('examSession', {
     },
 
     actions: {
-        /**
-         * Initialize session from an active test.
-         * If a session for this examId already exists (refresh), it is preserved.
-         */
+
         initSession({ examId, examName, timeLimit, remainingTime, questions, assignmentId, studentId, existingAnswers = {}, existingQuestionTimes = {} }) {
             // If same exam is already loaded (refresh scenario), just restore — don't overwrite
             if (this.examId === examId && this.questions.length > 0) {

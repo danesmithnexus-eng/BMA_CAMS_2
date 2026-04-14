@@ -363,7 +363,6 @@ export default {
                 .sort((a, b) => a.displayName.localeCompare(b.displayName));
         },
 
-        // ── FIXED: resolves both Student and Faculty users from studentTests ──
         aassignedStudents() {
             if (!this.selectedTest) return [];
             return this.studentTests
@@ -371,12 +370,10 @@ export default {
                 .map(st => {
                     const sid = Number(st.studentId);
 
-                    // 1. Try matching as a student (has a student sub-object)
                     let user = this.users?.find(u =>
                         u.student && Number(u.student.id) === sid
                     );
 
-                    // 2. Fall back to matching as faculty (uses u.id directly)
                     if (!user) {
                         user = this.users?.find(u => {
                             const role = (u.role || u.roles || '').toString().toLowerCase();
@@ -793,7 +790,6 @@ export default {
                     const role = (it.role || it.roles || '').toString().toLowerCase();
                     const isFaculty = role.includes('faculty');
 
-                    // Faculty use their top-level id; students use student_id / student.id
                     const sid = Number(
                         isFaculty
                             ? (it.id != null ? it.id : 0)

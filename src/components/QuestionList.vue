@@ -82,7 +82,8 @@ export default {
                     'validated': 'Pending Approval',
                     'archived': 'Rejected',
                     'rejected': 'Rejected',
-                    'invalid': 'Rejected'
+                    'invalid': 'Rejected',
+                    'revised': 'Revised'
                 };
                 if (val === 'inactive') return this.isCollecting() ? 'Pending Validation' : 'Pending Approval';
                 return map[val] || (s || 'Draft');
@@ -98,7 +99,8 @@ export default {
                     'Pending Validation': 'badge bg-info text-dark',
                     'Pending Approval': 'badge bg-primary',
                     'Approved': 'badge bg-success',
-                    'Rejected': 'badge bg-danger'
+                    'Rejected': 'badge bg-danger',
+                    'Revised': 'badge bg-warning text-dark'
                 };
                 return badges[status] || 'badge bg-light text-dark';
             } catch (e) {
@@ -329,6 +331,26 @@ export default {
                                 </button>
                                 <button class="btn btn-sm btn-success" @click="handleApprove(question)">
                                     Approve
+                                </button>
+                            </template>
+
+                            <!-- Approved Actions -->
+                            <template v-if="formatStatus(question.status) === 'Approved'">
+                                <button class="btn btn-sm btn-outline-secondary me-2" @click="handleEdit(question, course)">
+                                    Edit
+                                </button>
+                            </template>
+
+                            <!-- Revised Actions -->
+                            <template v-if="formatStatus(question.status) === 'Revised'">
+                                <button class="btn btn-sm btn-success me-2" @click="handleSubmit(question)">
+                                    Submit
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary me-2" @click="handleEdit(question, course)">
+                                    Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @click="handleDelete(question)">
+                                    Delete
                                 </button>
                             </template>
                         </div>
