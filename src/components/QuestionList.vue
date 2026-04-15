@@ -220,7 +220,7 @@ export default {
         <div v-if="!courseList || courseList.length === 0" class="card">
             <div class="card-body text-center text-muted p-5">
                 <i class="fas fa-inbox fa-3x mb-3 text-muted"></i>
-                <h5>Your question bank is empty</h5>
+                <h5>No questions retrieved</h5>
                 <p class="text-muted">Click "Add Question" or "Bulk Upload" to begin.</p>
             </div>
         </div>
