@@ -106,6 +106,13 @@
       </button>
 
       <button
+        class="btn btn-outline-warning"
+        @click="$emit('review')"
+      >
+        <i class="fas fa-list-check me-1"></i> Review Answers
+      </button>
+
+      <button
         v-if="index < total - 1"
         class="btn btn-primary"
         @click="$emit('next')"
@@ -114,10 +121,10 @@
       </button>
       <button
         v-else
-        class="btn btn-warning"
+        class="btn btn-success"
         @click="$emit('review')"
       >
-        <i class="fas fa-list-check me-1"></i> Review Answers
+        Finish <i class="fas fa-check-circle ms-1"></i>
       </button>
     </div>
   </div>

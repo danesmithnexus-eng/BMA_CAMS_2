@@ -19,6 +19,7 @@ export default {
         returnView: 'reportDetail',
         cognitiveLevels: ['Remembering', 'Understanding', 'Applying', 'Analyzing', 'Evaluating', 'Creating'],
         loading: false,
+        generatingPdf: false,
         _cachedReport: null
     }),
 
@@ -595,6 +596,44 @@ export default {
             this.$router.push({ name: targetView });
         },
 
+        async generateReviewPdf() {
+            const examId = this.selectedReport?.id;
+            if (!examId) return;
+
+            this.generatingPdf = true;
+            try {
+                // 1. Fetch AI Analysis (Optional step if the PDF generation needs it to be triggered first)
+                // You mentioned both endpoints, so we'll call the PDF generation one.
+                // Usually, generate-report-pdf might handle the AI analysis internally or expect it to exist.
+                
+                // For AI analysis trigger if needed:
+                await api.get(`/report/ai-analysis/${examId}`).catch(err => {
+                    console.warn('AI analysis trigger returned an error, proceeding to PDF generation:', err);
+                });
+
+                // 2. Generate and Download PDF
+                const response = await api.get(`/generate-report-pdf/${examId}`, {
+                    responseType: 'blob'
+                });
+
+                const url = window.URL.createObjectURL(new Blob([response.data]));
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `Review_Report_${examId}.pdf`);
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(url);
+
+                this.showToast('Success', 'Review PDF generated successfully.', 'success');
+            } catch (error) {
+                console.error('[Reports] PDF generation failed:', error);
+                this.showToast('Error', 'Failed to generate Review PDF.', 'error');
+            } finally {
+                this.generatingPdf = false;
+            }
+        },
+
         async openStudentResult(result) {
             if (!result) {
                 this.showToast('Error', 'No result data provided.', 'error');
@@ -872,14 +911,20 @@ export default {
 
     <!-- ── Report Detail ────────────────────────────────────────────────────── -->
     <div v-if="currentView === 'reportDetail'" class="container-fluid py-4">
-        <div class="d-flex align-items-center mb-4">
-            <button class="btn btn-outline-secondary me-3" @click="$router.push({ name: 'reports' })">
-                <i class="fas fa-arrow-left me-1"></i> Back
-            </button>
-            <div>
-                <h2 class="mb-0 fw-bold">{{ activeReport?.name || 'Report' }}</h2>
-                <small class="text-muted">{{ activeReport?.description || 'Comprehensive exam analysis and results' }}</small>
+        <div class="d-flex align-items-center justify-content-between mb-4">
+            <div class="d-flex align-items-center">
+                <button class="btn btn-outline-secondary me-3" @click="$router.push({ name: 'reports' })">
+                    <i class="fas fa-arrow-left me-1"></i> Back
+                </button>
+                <div>
+                    <h2 class="mb-0 fw-bold">{{ activeReport?.name || 'Report' }}</h2>
+                    <small class="text-muted">{{ activeReport?.description || 'Comprehensive exam analysis and results' }}</small>
+                </div>
             </div>
+            <button class="btn btn-success shadow-sm rounded-pill px-4" @click="generateReviewPdf" :disabled="generatingPdf">
+                <i class="fas me-2" :class="generatingPdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'"></i>
+                {{ generatingPdf ? 'Generating...' : 'Generate Review PDF' }}
+            </button>
         </div>
 
         <div class="row g-4 mb-5">
